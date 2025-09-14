@@ -46,7 +46,7 @@ const projectVersionsSchema = z.object({
 
 export type ProjectVersions = z.infer<typeof projectVersionsSchema>;
 
-const VERSIONS_FILE_PATH = path.join(__dirname, '..', 'projectVersions.json');
+const VERSIONS_FILE_PATH = path.join(process.cwd(), 'projectVersions.json');
 
 function readVersions(): ProjectVersions {
   const content = fs.readFileSync(VERSIONS_FILE_PATH, 'utf-8');

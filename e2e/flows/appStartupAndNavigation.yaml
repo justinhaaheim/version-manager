@@ -1,6 +1,0 @@
-appId: com.jhaa.healthlogger.devtest
----
-- launchApp
-- tapOn:
-    id: 'settingsTabButton'
-- assertVisible: 'Settings'

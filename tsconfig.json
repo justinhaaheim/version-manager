@@ -1,33 +1,22 @@
 {
-  "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "declaration": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
     "strict": true,
-
-    // My custom
-    /* Linting */
-    // "strict": true,
-    // I prefer to handle noUnusedLocals behavior via lint rules
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-
-    // This allows us to import from `/components/...` instead of relative paths
-    "baseUrl": ".",
-
-    "paths": {
-      "@/*": ["src/*"]
-    },
-
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true
   },
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts",
-    "**/*.m4a",
-    "**/*.aac"
-  ],
-  "exclude": ["tmp"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tmp"]
 }
