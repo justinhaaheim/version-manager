@@ -1,0 +1,46 @@
+{
+  "buildNumber": "11",
+  "codeVersion": "0.2.1",
+  "codeVersionHistory": {
+    "0.1.33": {
+      "branch": "add-visualization",
+      "commit": "206e40c5178f98a31950599f882f23dcfe8f73ab",
+      "message": "Test OTA update",
+      "timestamp": "2025-09-01T01:37:29.425Z",
+      "type": "update"
+    },
+    "0.1.34": {
+      "branch": "add-visualization",
+      "commit": "d55408c971b651d7320bac435c9ca843c6a3f562",
+      "message": "Add versioning script!",
+      "timestamp": "2025-09-01T04:10:49.945Z",
+      "type": "update"
+    },
+    "0.2.0": {
+      "branch": "add-visualization",
+      "commit": "7fd127bbd0a39affc2a2ac3f94a638dd701eaad4",
+      "timestamp": "2025-09-01T07:50:54.604Z",
+      "type": "update"
+    },
+    "0.2.1": {
+      "branch": "add-visualization",
+      "commit": "26355703a21f4a337906be533d534feb5cf7084a",
+      "timestamp": "2025-09-01T09:06:46.471Z",
+      "type": "build"
+    }
+  },
+  "releaseVersion": "0.1.0",
+  "runtimeVersion": "0.2.0",
+  "runtimeVersions": {
+    "0.1.25": {
+      "createdAt": "2025-08-31T00:00:00Z",
+      "fingerprints": [],
+      "message": "Initial runtime version"
+    },
+    "0.2.0": {
+      "createdAt": "2025-09-01T07:50:54.577Z",
+      "fingerprints": [],
+      "message": "Updated runtime to match code version 0.2.0"
+    }
+  }
+}

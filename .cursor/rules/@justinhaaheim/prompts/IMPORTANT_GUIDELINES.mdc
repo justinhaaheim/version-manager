@@ -1,0 +1,18 @@
+---
+description:
+globs: 
+alwaysApply: false
+---
+# Important guidelines
+
+- Use a scratchpad: [USE_SCRATCHPAD.md](./USE_SCRATCHPAD.mdc)
+
+- Make a plan [MAKE_A_PLAN.md](./MAKE_A_PLAN.mdc)
+
+- Stay focused: [STAY_FOCUSED.md](./STAY_FOCUSED.mdc)
+
+- Use good style [USE_GOOD_STYLE.md](./USE_GOOD_STYLE.mdc)
+
+- Check your work: [CHECK_YOUR_WORK.md](./CHECK_YOUR_WORK.mdc)
+
+- Commit regularly: [COMMIT_REGULARLY.md](./COMMIT_REGULARLY.mdc)

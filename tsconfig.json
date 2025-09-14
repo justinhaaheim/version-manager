@@ -1,0 +1,33 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+
+    // My custom
+    /* Linting */
+    // "strict": true,
+    // I prefer to handle noUnusedLocals behavior via lint rules
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+
+    // This allows us to import from `/components/...` instead of relative paths
+    "baseUrl": ".",
+
+    "paths": {
+      "@/*": ["src/*"]
+    },
+
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts",
+    "**/*.m4a",
+    "**/*.aac"
+  ],
+  "exclude": ["tmp"]
+}

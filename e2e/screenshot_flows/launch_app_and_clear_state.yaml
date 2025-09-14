@@ -1,0 +1,37 @@
+# Launch app only with specific theme
+appId: com.jhaa.healthlogger.devtest
+---
+- launchApp:
+    clearState: true
+    arguments:
+      testAppearanceMode: '${testAppearanceMode || "light"}'
+
+# In dev mode there are sometimes 2 dev client screens that pop up:
+#   1) The screen to select which metro server to connect to
+#   2) The screen introducing the dev menu for the first time. (and/or the normal Cmd+D dev menu)
+
+# # Do a positive check if the home screen is visible.
+# - assertVisible: {id: 'home-screen', optional: true}
+
+# Try tapping directly on the localhost link, if it's visible.
+- runFlow:
+    when:
+      visible: {id: 'DevLauncherMainScreen'}
+    commands:
+      - tapOn: {text: '.*localhost:.*', optional: true}
+
+# If that doesn't work let's try tapping on a point
+- runFlow:
+    when:
+      visible: {id: 'DevLauncherMainScreen'}
+    commands:
+      - tapOn: {point: '50%,26%', optional: true}
+
+# If we've waited long enough for the home screen to be visible, now we can check for the developer menu and swipe it away if need be.
+- runFlow:
+    when:
+      visible: {text: 'This is the developer menu.*'}
+    commands:
+      - swipe: {direction: 'DOWN'}
+
+- assertVisible: {id: 'home-screen'}

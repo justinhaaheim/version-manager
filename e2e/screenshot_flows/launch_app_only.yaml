@@ -1,0 +1,19 @@
+# Launch app only with specific theme
+appId: com.jhaa.healthlogger.devtest
+---
+- launchApp:
+    # clearState: false
+    arguments:
+      testAppearanceMode: '${testAppearanceMode || "light"}'
+
+# # Do a positive check if the home screen is visible.
+# - assertVisible: {id: 'home-screen', optional: true}
+
+# If we've waited long enough for the home screen to be visible, now we can check for the developer menu and swipe it away if need be.
+- runFlow:
+    when:
+      visible: {text: 'This is the developer menu.*'}
+    commands:
+      - swipe: {direction: 'DOWN'}
+
+- assertVisible: {id: 'home-screen'}

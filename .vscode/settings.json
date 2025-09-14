@@ -1,0 +1,43 @@
+{
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "[javascript]": {
+    "editor.codeActionsOnSave": [
+      // Run ESLint fixers _before_ prettier to ensure the user doesn't need to do multiple saves
+      "source.fixAll.eslint",
+      "source.fixAll.format"
+    ]
+  },
+  "[typescript]": {
+    "editor.codeActionsOnSave": [
+      // Run ESLint fixers _before_ prettier to ensure the user doesn't need to do multiple saves
+      "source.fixAll.eslint",
+      "source.fixAll.format"
+    ]
+  },
+  "[typescriptreact]": {
+    "editor.codeActionsOnSave": [
+      // Run ESLint fixers _before_ prettier to ensure the user doesn't need to do multiple saves
+      "source.fixAll.eslint",
+      "source.fixAll.format"
+    ]
+  },
+  // "typescript.tsdk": "node_modules/typescript/lib",
+  "search.exclude": {
+    "**/.yarn": true,
+    "**/package-lock.json": true
+  },
+  "typescript.tsdk": "node_modules/typescript/lib",
+
+  // Tell VSCode to use non-relative imports by default
+  "typescript.preferences.importModuleSpecifier": "non-relative",
+  "javascript.preferences.importModuleSpecifier": "non-relative",
+
+  "colorize.languages": ["javascript", "typescript", "typescriptreact"]
+
+  // Eslint stuff:
+  // "eslint.debug": true
+  // "eslint.options": {
+  //   "extensions": [".cjs", ".js", ".jsx", ".ts", ".tsx"]
+  // }
+}

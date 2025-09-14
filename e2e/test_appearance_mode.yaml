@@ -1,0 +1,33 @@
+# Test file to validate universal links for appearance mode control
+appId: com.jhaa.healthlogger.devtest
+---
+# Test light mode
+- launchApp
+- openLink:
+    link: 'health-logger-dev://universal?testAppearanceMode=light'
+    autoVerify: true
+- assertVisible: {id: 'homeTabButton'}
+- assertVisible: {id: 'testAppearanceModeIsLight'}
+- tapOn: {id: 'settingsTabButton'}
+- assertVisible: 'Settings'
+
+# Test dark mode
+- openLink:
+    link: 'health-logger-dev://universal?testAppearanceMode=dark'
+    autoVerify: true
+- assertVisible: {id: 'homeTabButton'}
+- assertVisible: {id: 'testAppearanceModeIsDark'}
+- tapOn: {id: 'settingsTabButton'}
+- assertVisible: 'Settings'
+
+# Test invalid mode (should log warning but not crash)
+- openLink:
+    link: 'voice-recorder-dev://universal?testAppearanceMode=invalid'
+    autoVerify: true
+- assertVisible: {id: 'homeTabButton'}
+# Should still be in dark mode from previous test
+- assertVisible: {id: 'testAppearanceModeIsDark'}
+
+# Test no mode parameter (should work normally and show either light or dark)
+- launchApp
+- assertVisible: {id: 'homeTabButton'}

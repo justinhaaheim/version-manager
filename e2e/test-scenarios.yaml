@@ -1,0 +1,63 @@
+appId: com.jhaa.healthlogger.dev
+---
+# Test Scenario: Standard Day
+- launchApp:
+    clearState: true
+    link: 'health-logger-dev://test/standard'
+
+- assertVisible: 'Health Logger'
+- takeScreenshot: 'timeline-standard-day'
+
+---
+# Test Scenario: Overlapping Medications
+- launchApp:
+    clearState: false
+    link: 'health-logger-dev://test/overlapping'
+
+- assertVisible: 'Health Logger'
+- takeScreenshot: 'timeline-overlapping-meds'
+
+---
+# Test Scenario: Max Dosage
+- launchApp:
+    clearState: false
+    link: 'health-logger-dev://test/maxDosage'
+
+- assertVisible: 'Health Logger'
+- takeScreenshot: 'timeline-max-dosage'
+
+---
+# Test Scenario: About to Expire
+- launchApp:
+    clearState: false
+    link: 'health-logger-dev://test/aboutToExpire'
+
+- assertVisible: 'Health Logger'
+- takeScreenshot: 'timeline-about-to-expire'
+
+---
+# Clear Test Mode
+- launchApp:
+    clearState: false
+    link: 'health-logger-dev://test/clear'
+
+- assertVisible: 'Health Logger'
+
+---
+# Alternative: Navigate via Settings UI
+- launchApp:
+    clearState: true
+
+- tapOn: 'Settings'
+- scrollUntilVisible:
+    element: 'Test Scenarios'
+
+# Load a test scenario via UI
+- tapOn: 'Overlapping Medications'
+- assertVisible: 'Health Logger'
+
+# Clear test mode via UI
+- tapOn: 'Settings'
+- scrollUntilVisible:
+    element: 'Clear Test Mode'
+- tapOn: 'Clear Test Mode'
