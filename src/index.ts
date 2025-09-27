@@ -5,6 +5,13 @@ import {join} from 'path';
 import * as readline from 'readline';
 
 import {checkGitignore, installGitHooks} from './git-hooks-manager';
+import {
+  addScriptsToPackageJson,
+  getConflictingScripts,
+  hasExistingDynamicVersionScripts,
+  listDefaultScripts,
+  readPackageJson,
+} from './script-manager';
 import {generateVersion} from './version-generator';
 
 async function promptUser(question: string): Promise<boolean> {
@@ -29,17 +36,18 @@ Usage:
   npx @justinhaaheim/version-manager [options]
 
 Options:
-  --install           Install git hooks for automatic version updates
+  --install           Install git hooks, generate version file, and add scripts to package.json
+  --install-scripts   Add/update dynamic-version scripts in package.json
   --increment-patch   Increment patch version with each commit
   -o, --output <path> Output file path (default: ./dynamic-version.local.json)
   -s, --silent        Suppress console output
   -h, --help          Show help
 
 Examples:
-  npx @justinhaaheim/version-manager
-  npx @justinhaaheim/version-manager --install
+  npx @justinhaaheim/version-manager              # Generate version file only
+  npx @justinhaaheim/version-manager --install    # Full installation (hooks + scripts)
   npx @justinhaaheim/version-manager --install --increment-patch
-  npx @justinhaaheim/version-manager --output ./src/version.json
+  npx @justinhaaheim/version-manager --install-scripts  # Add/update scripts only
 `);
 }
 
@@ -47,6 +55,7 @@ async function main() {
   try {
     const args = process.argv.slice(2);
     let shouldInstall = false;
+    let shouldInstallScripts = false;
     let incrementPatch = false;
     let outputPath: string | undefined;
     let silent = false;
@@ -54,6 +63,8 @@ async function main() {
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--install') {
         shouldInstall = true;
+      } else if (args[i] === '--install-scripts') {
+        shouldInstallScripts = true;
       } else if (args[i] === '--increment-patch') {
         incrementPatch = true;
       } else if (args[i] === '--output' || args[i] === '-o') {
@@ -107,7 +118,63 @@ async function main() {
       }
     }
 
-    // Install git hooks if requested
+    // Handle --install-scripts separately
+    if (shouldInstallScripts) {
+      const packageJson = readPackageJson();
+      if (!packageJson) {
+        console.error('❌ No package.json found in current directory');
+        process.exit(1);
+      }
+
+      const hasExisting = hasExistingDynamicVersionScripts(packageJson);
+      const conflicts = getConflictingScripts(packageJson);
+
+      if (hasExisting) {
+        console.log('⚠️  Existing dynamic-version scripts detected:');
+        if (conflicts.length > 0) {
+          console.log('\nThe following scripts would be overwritten:');
+          for (const conflict of conflicts) {
+            console.log(
+              `  - ${conflict.name}: ${packageJson.scripts?.[conflict.name]}`,
+            );
+          }
+        }
+
+        const shouldForce = await promptUser(
+          '\nDo you want to add/update the scripts anyway? (y/N): ',
+        );
+
+        if (!shouldForce) {
+          console.log('Script installation cancelled.');
+          process.exit(0);
+        }
+
+        const result = addScriptsToPackageJson(true);
+        if (result.success) {
+          console.log('✅', result.message);
+          if (result.conflictsOverwritten.length > 0) {
+            console.log(
+              `   Scripts overwritten: ${result.conflictsOverwritten.join(', ')}`,
+            );
+          }
+          listDefaultScripts();
+        } else {
+          console.error('❌', result.message);
+          process.exit(1);
+        }
+      } else {
+        const result = addScriptsToPackageJson(false);
+        if (result.success) {
+          console.log('✅', result.message);
+          listDefaultScripts();
+        } else {
+          console.error('❌', result.message);
+        }
+      }
+      process.exit(0);
+    }
+
+    // Install git hooks and scripts if --install flag is used
     if (shouldInstall) {
       if (!silent) {
         console.log('\n📦 Installing git hooks...');
@@ -120,6 +187,37 @@ async function main() {
         console.log('   - Checkouts (post-checkout)');
         console.log('   - Merges (post-merge)');
         console.log('   - Rebases (post-rewrite)');
+
+        // Add scripts to package.json during --install
+        console.log('\n📝 Checking package.json scripts...');
+        const packageJson = readPackageJson();
+        if (packageJson) {
+          const hasExisting = hasExistingDynamicVersionScripts(packageJson);
+          if (hasExisting) {
+            console.log(
+              '   ℹ️  Existing dynamic-version scripts detected. Preserving customizations.',
+            );
+          } else {
+            const result = addScriptsToPackageJson(false);
+            if (result.success) {
+              console.log(`   ✅ ${result.message}`);
+              console.log('\n   Added scripts:');
+              console.log(
+                '   - npm run dynamic-version           # Reinstall/update',
+              );
+              console.log(
+                '   - npm run dynamic-version:generate   # Generate version file',
+              );
+              console.log(
+                '   - npm run dynamic-version:install-scripts  # Update scripts',
+              );
+            } else {
+              console.log(`   ⚠️  ${result.message}`);
+            }
+          }
+        } else {
+          console.log('   ⚠️  No package.json found. Scripts not installed.');
+        }
       }
     }
 
