@@ -47,7 +47,11 @@
     "version:interactive": "bun src/cli.ts",
     "version:show": "bun src/cli.ts --show",
     "version:history": "bun src/cli.ts --history",
-    "version:repair": "bun src/cli.ts --repair"
+    "version:repair": "bun src/cli.ts --repair",
+    "dynamic-version": "npx @justinhaaheim/version-manager --install",
+    "dynamic-version:install": "npx @justinhaaheim/version-manager --install",
+    "dynamic-version:install-scripts": "npx @justinhaaheim/version-manager --install-scripts",
+    "dynamic-version:generate": "npx @justinhaaheim/version-manager"
   },
   "dependencies": {},
   "devDependencies": {
