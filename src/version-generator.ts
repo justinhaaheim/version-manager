@@ -61,7 +61,11 @@ function formatHumanReadable(
   return result;
 }
 
-export async function generateVersion(): Promise<VersionInfo> {
+export async function generateVersion(
+  options: {incrementPatch?: boolean} = {},
+): Promise<VersionInfo> {
+  const {incrementPatch = false} = options;
+
   const isRepo = await isGitRepository();
   if (!isRepo) {
     throw new Error(
@@ -74,7 +78,29 @@ export async function generateVersion(): Promise<VersionInfo> {
   const dirty = describe.includes('-dirty');
 
   const components = parseGitDescribe(describe);
-  const humanReadable = formatHumanReadable(components, branch, dirty);
+
+  let version: string;
+  let humanReadable: string;
+
+  if (incrementPatch && components) {
+    const [major, minor, patch] = components.baseVersion.split('.').map(Number);
+    const newPatch = patch + components.commitsSince;
+    version = `${major}.${minor}.${newPatch}`;
+
+    if (branch !== 'main' && branch !== 'master') {
+      const safeBranch = branch.replace(/[^a-zA-Z0-9-]/g, '-').substring(0, 50);
+      version += `-${safeBranch}`;
+    }
+
+    if (dirty) {
+      version += '+dirty';
+    }
+
+    humanReadable = version;
+  } else {
+    humanReadable = formatHumanReadable(components, branch, dirty);
+    version = components ? components.baseVersion : 'unknown';
+  }
 
   return {
     branch: branch,
@@ -83,5 +109,6 @@ export async function generateVersion(): Promise<VersionInfo> {
     dirty,
     humanReadable,
     timestamp: new Date().toISOString(),
+    version,
   };
 }

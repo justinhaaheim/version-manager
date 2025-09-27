@@ -3,8 +3,10 @@ export interface VersionInfo {
   components: VersionComponents | null;
   describe: string;
   dirty: boolean;
+  error?: boolean;
   humanReadable: string;
   timestamp: string;
+  version: string;
 }
 
 export interface VersionComponents {
@@ -14,6 +16,7 @@ export interface VersionComponents {
 }
 
 export interface GenerateVersionOptions {
+  incrementPatch?: boolean;
   outputPath?: string;
   silent?: boolean;
 }
