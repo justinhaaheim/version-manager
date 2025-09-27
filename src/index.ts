@@ -1,122 +1,241 @@
-/**
- * @justinhaaheim/version-manager
- *
- * A comprehensive version tracking system for JavaScript/TypeScript projects
- */
+#!/usr/bin/env node
 
-// Re-export the main functions for programmatic use
-import {execSync} from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as semver from 'semver';
-import {z} from 'zod';
+import {existsSync, readFileSync, writeFileSync} from 'fs';
+import {join} from 'path';
+import * as readline from 'readline';
 
-// Custom Zod refinement for semver validation
-const semverString = z.string().refine((val) => semver.valid(val) !== null, {
-  message: 'Must be a valid semantic version',
-});
+import {checkGitignore, installGitHooks} from './git-hooks-manager';
+import {
+  addScriptsToPackageJson,
+  getConflictingScripts,
+  hasExistingDynamicVersionScripts,
+  listDefaultScripts,
+  readPackageJson,
+} from './script-manager';
+import {generateVersion} from './version-generator';
 
-// Zod schema for version history entry
-const versionHistoryEntrySchema = z.object({
-  branch: z.string().optional(),
-  channel: z.string().optional(),
-  commit: z.string().optional(),
-  message: z.string().optional(),
-  profile: z.string().optional(),
-  timestamp: z.string(),
-  type: z.enum(['build', 'update']),
-});
+async function promptUser(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
 
-// Zod schema for runtime version entry
-const runtimeVersionEntrySchema = z.object({
-  createdAt: z.string(),
-  fingerprints: z.array(z.string()),
-  message: z.string().optional(),
-});
-
-// Zod schema for ProjectVersions
-const projectVersionsSchema = z.object({
-  buildNumber: z
-    .string()
-    .regex(/^\d+$/, 'Build number must be a numeric string'),
-  codeVersion: semverString,
-  codeVersionHistory: z.record(z.string(), versionHistoryEntrySchema),
-  releaseVersion: semverString,
-  runtimeVersion: semverString,
-  runtimeVersions: z.record(z.string(), runtimeVersionEntrySchema),
-});
-
-export type ProjectVersions = z.infer<typeof projectVersionsSchema>;
-
-export interface VersionManagerOptions {
-  versionsFilePath?: string;
+  return await new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
+    });
+  });
 }
 
-export class VersionManager {
-  private versionsFilePath: string;
+function printHelp() {
+  console.log(`
+@justinhaaheim/version-manager - Git hooks-based dynamic version generator
 
-  constructor(options: VersionManagerOptions = {}) {
-    this.versionsFilePath =
-      options.versionsFilePath ??
-      path.join(process.cwd(), 'projectVersions.json');
-  }
+Usage:
+  npx @justinhaaheim/version-manager [options]
 
-  readVersions(): ProjectVersions {
-    const content = fs.readFileSync(this.versionsFilePath, 'utf-8');
-    const parsed = JSON.parse(content) as unknown;
+Options:
+  --install           Install git hooks, generate version file, and add scripts to package.json
+  --install-scripts   Add/update dynamic-version scripts in package.json
+  --increment-patch   Increment patch version with each commit
+  -o, --output <path> Output file path (default: ./dynamic-version.local.json)
+  -s, --silent        Suppress console output
+  -h, --help          Show help
 
-    const result = projectVersionsSchema.safeParse(parsed);
-    if (!result.success) {
-      throw new Error(
-        `Invalid projectVersions.json schema: ${JSON.stringify(result.error.format(), null, 2)}`,
-      );
+Examples:
+  npx @justinhaaheim/version-manager              # Generate version file only
+  npx @justinhaaheim/version-manager --install    # Full installation (hooks + scripts)
+  npx @justinhaaheim/version-manager --install --increment-patch
+  npx @justinhaaheim/version-manager --install-scripts  # Add/update scripts only
+`);
+}
+
+async function main() {
+  try {
+    const args = process.argv.slice(2);
+    let shouldInstall = false;
+    let shouldInstallScripts = false;
+    let incrementPatch = false;
+    let outputPath: string | undefined;
+    let silent = false;
+
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--install') {
+        shouldInstall = true;
+      } else if (args[i] === '--install-scripts') {
+        shouldInstallScripts = true;
+      } else if (args[i] === '--increment-patch') {
+        incrementPatch = true;
+      } else if (args[i] === '--output' || args[i] === '-o') {
+        outputPath = args[++i];
+      } else if (args[i] === '--silent' || args[i] === '-s') {
+        silent = true;
+      } else if (args[i] === '--help' || args[i] === '-h') {
+        printHelp();
+        process.exit(0);
+      }
     }
 
-    return result.data;
-  }
+    // Check if .local.json is in .gitignore
+    const gitignoreOk = checkGitignore();
+    if (!gitignoreOk && !silent) {
+      console.log('⚠️  Pattern "*.local.json" is not in .gitignore');
+      const shouldAdd = await promptUser('Would you like to add it? (y/n): ');
 
-  writeVersions(versions: ProjectVersions): void {
-    const result = projectVersionsSchema.safeParse(versions);
-    if (!result.success) {
-      throw new Error(
-        `Cannot write invalid schema: ${JSON.stringify(result.error.format(), null, 2)}`,
-      );
+      if (shouldAdd) {
+        const gitignorePath = join(process.cwd(), '.gitignore');
+        const content = existsSync(gitignorePath)
+          ? readFileSync(gitignorePath, 'utf-8')
+          : '';
+
+        writeFileSync(
+          gitignorePath,
+          content + (content.endsWith('\n') ? '' : '\n') + '*.local.json\n',
+        );
+        console.log('✅ Added *.local.json to .gitignore');
+      } else {
+        console.log(
+          '⚠️  Continuing without gitignore update. Be careful not to commit dynamic-version.local.json!',
+        );
+      }
     }
 
-    fs.writeFileSync(
-      this.versionsFilePath,
-      JSON.stringify(versions, null, 2) + '\n',
-    );
-  }
+    // Generate version info
+    const versionInfo = await generateVersion({incrementPatch});
 
-  incrementCodeVersion(
-    currentVersion: string,
-    type: 'major' | 'minor' | 'patch' = 'patch',
-  ): string {
-    const newVersion = semver.inc(currentVersion, type);
-    if (!newVersion) {
-      throw new Error(`Failed to increment version: ${currentVersion}`);
-    }
-    return newVersion;
-  }
+    // Write to dynamic-version.local.json
+    const finalOutputPath =
+      outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
+    writeFileSync(finalOutputPath, JSON.stringify(versionInfo, null, 2));
 
-  incrementBuildNumber(currentBuildNumber: string): string {
-    const num = parseInt(currentBuildNumber, 10);
-    if (isNaN(num)) {
-      throw new Error(`Invalid build number: ${currentBuildNumber}`);
-    }
-    return String(num + 1);
-  }
+    if (!silent) {
+      console.log(`✅ Version info generated: ${versionInfo.humanReadable}`);
+      console.log(`📝 Written to: ${finalOutputPath}`);
 
-  getGitInfo(): {branch?: string; commit?: string} {
-    try {
-      const commit = execSync('git rev-parse HEAD', {encoding: 'utf-8'}).trim();
-      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
-        encoding: 'utf-8',
-      }).trim();
-      return {branch, commit};
-    } catch {
-      return {};
+      if (versionInfo.dirty) {
+        console.log('⚠️  Warning: Uncommitted changes detected');
+      }
     }
+
+    // Handle --install-scripts separately
+    if (shouldInstallScripts) {
+      const packageJson = readPackageJson();
+      if (!packageJson) {
+        console.error('❌ No package.json found in current directory');
+        process.exit(1);
+      }
+
+      const hasExisting = hasExistingDynamicVersionScripts(packageJson);
+      const conflicts = getConflictingScripts(packageJson);
+
+      if (hasExisting) {
+        console.log('⚠️  Existing dynamic-version scripts detected:');
+        if (conflicts.length > 0) {
+          console.log('\nThe following scripts would be overwritten:');
+          for (const conflict of conflicts) {
+            console.log(
+              `  - ${conflict.name}: ${packageJson.scripts?.[conflict.name]}`,
+            );
+          }
+        }
+
+        const shouldForce = await promptUser(
+          '\nDo you want to add/update the scripts anyway? (y/N): ',
+        );
+
+        if (!shouldForce) {
+          console.log('Script installation cancelled.');
+          process.exit(0);
+        }
+
+        const result = addScriptsToPackageJson(true);
+        if (result.success) {
+          console.log('✅', result.message);
+          if (result.conflictsOverwritten.length > 0) {
+            console.log(
+              `   Scripts overwritten: ${result.conflictsOverwritten.join(', ')}`,
+            );
+          }
+          listDefaultScripts();
+        } else {
+          console.error('❌', result.message);
+          process.exit(1);
+        }
+      } else {
+        const result = addScriptsToPackageJson(false);
+        if (result.success) {
+          console.log('✅', result.message);
+          listDefaultScripts();
+        } else {
+          console.error('❌', result.message);
+        }
+      }
+      process.exit(0);
+    }
+
+    // Install git hooks and scripts if --install flag is used
+    if (shouldInstall) {
+      if (!silent) {
+        console.log('\n📦 Installing git hooks...');
+      }
+      installGitHooks(incrementPatch);
+      if (!silent) {
+        console.log('✅ Git hooks installed successfully');
+        console.log('   Hooks will auto-update dynamic-version.local.json on:');
+        console.log('   - Commits (post-commit)');
+        console.log('   - Checkouts (post-checkout)');
+        console.log('   - Merges (post-merge)');
+        console.log('   - Rebases (post-rewrite)');
+
+        // Add scripts to package.json during --install
+        console.log('\n📝 Checking package.json scripts...');
+        const packageJson = readPackageJson();
+        if (packageJson) {
+          const hasExisting = hasExistingDynamicVersionScripts(packageJson);
+          if (hasExisting) {
+            console.log(
+              '   ℹ️  Existing dynamic-version scripts detected. Preserving customizations.',
+            );
+          } else {
+            const result = addScriptsToPackageJson(false);
+            if (result.success) {
+              console.log(`   ✅ ${result.message}`);
+              console.log('\n   Added scripts:');
+              console.log(
+                '   - npm run dynamic-version           # Reinstall/update',
+              );
+              console.log(
+                '   - npm run dynamic-version:generate   # Generate version file',
+              );
+              console.log(
+                '   - npm run dynamic-version:install-scripts  # Update scripts',
+              );
+            } else {
+              console.log(`   ⚠️  ${result.message}`);
+            }
+          }
+        } else {
+          console.log('   ⚠️  No package.json found. Scripts not installed.');
+        }
+      }
+    }
+
+    process.exit(0);
+  } catch (error) {
+    if (error instanceof Error) {
+      console.error('❌ Failed to generate version info:', error.message);
+    } else {
+      console.error('❌ Failed to generate version info:', error);
+    }
+    process.exit(1);
   }
+}
+
+// Run immediately if executed directly
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('Unexpected error:', error);
+    process.exit(1);
+  });
 }

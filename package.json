@@ -1,11 +1,16 @@
 {
   "name": "@justinhaaheim/version-manager",
   "description": "A comprehensive version tracking system for JavaScript/TypeScript projects with support for semantic versioning, build numbers, and runtime versions",
-  "version": "1.0.0",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "version": "2.0.0",
+  "main": "dist/reader.js",
+  "types": "dist/reader.d.ts",
   "bin": {
-    "version-manager": "./dist/cli.js"
+    "generate-version": "./dist/index.js",
+    "dynamic-version": "./dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/reader.js",
+    "./reader": "./dist/reader.js"
   },
   "files": [
     "dist",
@@ -31,26 +36,14 @@
     "ts-check": "tsc --noEmit",
     "ts-check-masked": "bun run ts-check",
     "prepare": "husky",
-    "version": "bun src/cli.ts",
-    "version:bump": "bun src/cli.ts --bump",
-    "version:bump:major": "bun src/cli.ts --bump --major",
-    "version:bump:minor": "bun src/cli.ts --bump --minor",
-    "version:bump-for-build": "bun src/cli.ts --bump-for-build",
-    "version:build-only": "bun src/cli.ts --build-only",
-    "version:update-runtime": "bun src/cli.ts --bump --minor --update-runtime",
-    "version:interactive": "bun src/cli.ts",
-    "version:show": "bun src/cli.ts --show",
-    "version:history": "bun src/cli.ts --history",
-    "version:repair": "bun src/cli.ts --repair"
+    "dynamic-version": "npx @justinhaaheim/version-manager --install",
+    "dynamic-version:install": "npx @justinhaaheim/version-manager --install",
+    "dynamic-version:install-scripts": "npx @justinhaaheim/version-manager --install-scripts",
+    "dynamic-version:generate": "npx @justinhaaheim/version-manager"
   },
-  "dependencies": {
-    "semver": "7.7.2",
-    "yargs": "^18.0.0",
-    "zod": "4.1.5"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@types/semver": "7.7.0",
-    "@types/yargs": "^17.0.33",
+    "@types/node": "^20.0.0",
     "concurrently": "8.2.1",
     "eslint": "9.31.0",
     "eslint-config-jha-react-node": "github:justinhaaheim/eslint-config-jha-react-node",
@@ -66,7 +59,12 @@
     "build",
     "release",
     "version-manager",
-    "cli"
+    "cli",
+    "git",
+    "git-hooks",
+    "react",
+    "react-native",
+    "development"
   ],
   "author": "Justin Haaheim",
   "license": "MIT",
