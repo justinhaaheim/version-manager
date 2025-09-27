@@ -1,122 +1,74 @@
-/**
- * @justinhaaheim/version-manager
- *
- * A comprehensive version tracking system for JavaScript/TypeScript projects
- */
+#!/usr/bin/env node
 
-// Re-export the main functions for programmatic use
-import {execSync} from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as semver from 'semver';
-import {z} from 'zod';
+import type {GenerateVersionOptions} from './types';
 
-// Custom Zod refinement for semver validation
-const semverString = z.string().refine((val) => semver.valid(val) !== null, {
-  message: 'Must be a valid semantic version',
-});
+import {writeFileSync} from 'fs';
+import {join} from 'path';
 
-// Zod schema for version history entry
-const versionHistoryEntrySchema = z.object({
-  branch: z.string().optional(),
-  channel: z.string().optional(),
-  commit: z.string().optional(),
-  message: z.string().optional(),
-  profile: z.string().optional(),
-  timestamp: z.string(),
-  type: z.enum(['build', 'update']),
-});
+import {generateVersion} from './version-generator';
 
-// Zod schema for runtime version entry
-const runtimeVersionEntrySchema = z.object({
-  createdAt: z.string(),
-  fingerprints: z.array(z.string()),
-  message: z.string().optional(),
-});
+function printHelp() {
+  console.log(`
+@justinhaaheim/version-manager - Generate unique version identifiers for each commit
 
-// Zod schema for ProjectVersions
-const projectVersionsSchema = z.object({
-  buildNumber: z
-    .string()
-    .regex(/^\d+$/, 'Build number must be a numeric string'),
-  codeVersion: semverString,
-  codeVersionHistory: z.record(z.string(), versionHistoryEntrySchema),
-  releaseVersion: semverString,
-  runtimeVersion: semverString,
-  runtimeVersions: z.record(z.string(), runtimeVersionEntrySchema),
-});
+Usage:
+  npx @justinhaaheim/version-manager [options]
 
-export type ProjectVersions = z.infer<typeof projectVersionsSchema>;
+Options:
+  -o, --output <path>  Output file path (default: ./package-versions.json)
+  -s, --silent         Suppress console output
+  -h, --help           Show help
 
-export interface VersionManagerOptions {
-  versionsFilePath?: string;
+Examples:
+  npx @justinhaaheim/version-manager
+  npx @justinhaaheim/version-manager --output ./src/version.json
+  npx @justinhaaheim/version-manager --silent
+`);
 }
 
-export class VersionManager {
-  private versionsFilePath: string;
+async function main() {
+  try {
+    const args = process.argv.slice(2);
+    const options: GenerateVersionOptions = {};
 
-  constructor(options: VersionManagerOptions = {}) {
-    this.versionsFilePath =
-      options.versionsFilePath ??
-      path.join(process.cwd(), 'projectVersions.json');
-  }
-
-  readVersions(): ProjectVersions {
-    const content = fs.readFileSync(this.versionsFilePath, 'utf-8');
-    const parsed = JSON.parse(content) as unknown;
-
-    const result = projectVersionsSchema.safeParse(parsed);
-    if (!result.success) {
-      throw new Error(
-        `Invalid projectVersions.json schema: ${JSON.stringify(result.error.format(), null, 2)}`,
-      );
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--output' || args[i] === '-o') {
+        options.outputPath = args[++i];
+      } else if (args[i] === '--silent' || args[i] === '-s') {
+        options.silent = true;
+      } else if (args[i] === '--help' || args[i] === '-h') {
+        printHelp();
+        process.exit(0);
+      }
     }
 
-    return result.data;
-  }
+    const versionInfo = await generateVersion();
 
-  writeVersions(versions: ProjectVersions): void {
-    const result = projectVersionsSchema.safeParse(versions);
-    if (!result.success) {
-      throw new Error(
-        `Cannot write invalid schema: ${JSON.stringify(result.error.format(), null, 2)}`,
-      );
+    const outputPath =
+      options.outputPath ?? join(process.cwd(), 'package-versions.json');
+    writeFileSync(outputPath, JSON.stringify(versionInfo, null, 2));
+
+    if (!options.silent) {
+      console.log(`✅ Version info generated: ${versionInfo.humanReadable}`);
+      console.log(`📝 Written to: ${outputPath}`);
+
+      if (versionInfo.dirty) {
+        console.log('⚠️  Warning: Uncommitted changes detected');
+      }
     }
 
-    fs.writeFileSync(
-      this.versionsFilePath,
-      JSON.stringify(versions, null, 2) + '\n',
-    );
-  }
-
-  incrementCodeVersion(
-    currentVersion: string,
-    type: 'major' | 'minor' | 'patch' = 'patch',
-  ): string {
-    const newVersion = semver.inc(currentVersion, type);
-    if (!newVersion) {
-      throw new Error(`Failed to increment version: ${currentVersion}`);
+    process.exit(0);
+  } catch (error) {
+    if (error instanceof Error) {
+      console.error('❌ Failed to generate version info:', error.message);
+    } else {
+      console.error('❌ Failed to generate version info:', error);
     }
-    return newVersion;
-  }
-
-  incrementBuildNumber(currentBuildNumber: string): string {
-    const num = parseInt(currentBuildNumber, 10);
-    if (isNaN(num)) {
-      throw new Error(`Invalid build number: ${currentBuildNumber}`);
-    }
-    return String(num + 1);
-  }
-
-  getGitInfo(): {branch?: string; commit?: string} {
-    try {
-      const commit = execSync('git rev-parse HEAD', {encoding: 'utf-8'}).trim();
-      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
-        encoding: 'utf-8',
-      }).trim();
-      return {branch, commit};
-    } catch {
-      return {};
-    }
+    process.exit(1);
   }
 }
+
+main().catch((error) => {
+  console.error('Unexpected error:', error);
+  process.exit(1);
+});

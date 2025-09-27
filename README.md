@@ -1,8 +1,22 @@
 # @justinhaaheim/version-manager
 
-A comprehensive version tracking system for JavaScript/TypeScript projects with support for semantic versioning, build numbers, runtime versions, and release versions.
+Generate unique version identifiers for every commit in your React/React Native projects. Easily identify which exact version of code is running during development, especially with multiple branches and dev servers.
+
+Also includes a comprehensive version tracking system for JavaScript/TypeScript projects with support for semantic versioning, build numbers, runtime versions, and release versions.
 
 ## Features
+
+### Version Generation (generate-version)
+
+- 🔍 **Unique version for every commit** - Uses `git describe` with branch info
+- 🏷️ **Human-readable format** - Shows meaningful versions like "0.2.11+5 (feature-auth)"
+- ⚠️ **Dirty state indicator** - Asterisk (\*) shows uncommitted changes
+- 🌲 **Branch awareness** - Always know which branch the code is from
+- 📦 **Zero dependencies for generation** - Lightweight and fast
+- 🔧 **Zero config** - Works out of the box with any git repository
+- 💻 **TypeScript ready** - Full type definitions included
+
+### Version Management (version-manager)
 
 - **Multiple Version Types**: Track code versions, build numbers, runtime versions, and release versions independently
 - **Git Integration**: Automatically records branch and commit information with each version change
@@ -21,7 +35,32 @@ yarn add -D @justinhaaheim/version-manager
 bun add -D @justinhaaheim/version-manager
 ```
 
-## Quick Start
+## Quick Start - Version Generation
+
+No installation required! Run directly with npx:
+
+```bash
+npx @justinhaaheim/version-manager generate-version
+```
+
+This creates a `package-versions.json` file in your project root:
+
+```json
+{
+  "describe": "v0.2.11-5-g3a7f9b2-dirty",
+  "branch": "feature-auth",
+  "dirty": true,
+  "timestamp": "2024-12-20T19:45:30.123Z",
+  "humanReadable": "0.2.11+5 (feature-auth) *",
+  "components": {
+    "baseVersion": "0.2.11",
+    "commitsSince": 5,
+    "shortHash": "3a7f9b2"
+  }
+}
+```
+
+## Quick Start - Version Management
 
 1. Initialize your project with a `projectVersions.json` file:
 
@@ -91,7 +130,109 @@ The public-facing version shown in app stores.
 - **Format**: Semantic versioning
 - **Used for**: App store display, marketing
 
-## CLI Usage
+## Version Generation Usage
+
+### Generate Version CLI
+
+```bash
+npx @justinhaaheim/version-manager generate-version [options]
+
+Options:
+  -o, --output <path>  Output file path (default: ./package-versions.json)
+  -s, --silent         Suppress console output
+  -h, --help           Show help
+```
+
+### Integration with Build Scripts
+
+Add to your `package.json` scripts:
+
+```json
+{
+  "scripts": {
+    "dev": "npx @justinhaaheim/version-manager generate-version && vite",
+    "build": "npx @justinhaaheim/version-manager generate-version && vite build",
+    "start": "npx @justinhaaheim/version-manager generate-version && react-scripts start"
+  }
+}
+```
+
+### Using in React Components
+
+```tsx
+// VersionDisplay.tsx
+import versionInfo from '../package-versions.json';
+
+export const VersionDisplay = () => {
+  // Only show in development
+  if (process.env.NODE_ENV === 'production') return null;
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        bottom: 4,
+        right: 4,
+        padding: '2px 8px',
+        fontSize: '11px',
+        fontFamily: 'monospace',
+        background: 'rgba(0,0,0,0.8)',
+        color: versionInfo.dirty ? '#ffaa00' : '#00ff00',
+        borderRadius: 3,
+        pointerEvents: 'none',
+        zIndex: 9999,
+      }}>
+      {versionInfo.humanReadable}
+    </div>
+  );
+};
+```
+
+### TypeScript Support for Version Generation
+
+Add type declarations to your project:
+
+```typescript
+// types/package-versions.d.ts
+declare module '*/package-versions.json' {
+  export interface VersionInfo {
+    describe: string;
+    branch: string;
+    dirty: boolean;
+    timestamp: string;
+    humanReadable: string;
+    components: {
+      baseVersion: string;
+      commitsSince: number;
+      shortHash: string;
+    } | null;
+  }
+
+  const versionInfo: VersionInfo;
+  export default versionInfo;
+}
+```
+
+### Version Format
+
+The human-readable version format follows this pattern:
+
+- **Tagged commits**: `0.2.11` (when exactly on a tag)
+- **Commits after tag**: `0.2.11+5` (5 commits after v0.2.11)
+- **Non-main branch**: `0.2.11+5 (feature-auth)`
+- **Uncommitted changes**: `0.2.11+5 (feature-auth) *`
+- **No tags yet**: `untagged (main)`
+
+### Edge Cases
+
+The package handles these scenarios gracefully:
+
+- **No git tags yet**: Falls back to showing "untagged" with branch name
+- **Not a git repository**: Shows clear error message
+- **Detached HEAD state**: Shows "HEAD" as branch name
+- **Uncommitted changes**: Adds "-dirty" suffix and asterisk to human-readable version
+
+## Version Management CLI Usage
 
 ### Commands
 
