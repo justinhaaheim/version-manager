@@ -2,9 +2,8 @@ name: Check dist
 
 on:
   push:
-    branches: [main, create-initial-version]
+    branches: [main]
   pull_request:
-    branches: [main, create-initial-version]
 
 jobs:
   check-dist:
