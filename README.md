@@ -409,5 +409,3 @@ MIT © Justin Haaheim
 
 - [VERSIONING.md](./VERSIONING.md) - Detailed versioning guide and workflows
 - [CLAUDE.md](./CLAUDE.md) - Development instructions and guidelines
-
-# Test comment

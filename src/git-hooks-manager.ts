@@ -26,15 +26,36 @@ export function installGitHooks(incrementPatch = false): void {
     throw new Error('Not a git repository (no .git/hooks directory found)');
   }
 
-  const packageName = '@justinhaaheim/version-manager';
+  // Detect if we're running from the version-manager development directory itself
+  const currentPackageJsonPath = join(process.cwd(), 'package.json');
+  let runCommand = 'npx @justinhaaheim/version-manager';
+
+  if (existsSync(currentPackageJsonPath)) {
+    try {
+      const packageJson = JSON.parse(
+        readFileSync(currentPackageJsonPath, 'utf-8'),
+      ) as {name?: string};
+      if (packageJson.name === '@justinhaaheim/version-manager') {
+        // We're in the development directory, use local script
+        runCommand = 'bun run test:local';
+        console.log(
+          '   ℹ️  Detected local development environment, using: bun run test:local',
+        );
+      }
+    } catch {
+      // If we can't read package.json, default to npx
+    }
+  }
+
   const incrementFlag = incrementPatch ? ' --increment-patch' : '';
+  const finalCommand = runCommand + incrementFlag;
 
   const hookScript = `#!/bin/sh
 # Auto-generated hook by @justinhaaheim/version-manager
 # This hook updates the dynamic-version.local.json file
 
-# Run the version generator using npx
-npx ${packageName}${incrementFlag} 2>/dev/null || true
+# Run the version generator
+${finalCommand} 2>/dev/null || true
 
 # Exit successfully regardless of version generator result
 exit 0
@@ -55,7 +76,7 @@ exit 0
           existingContent +
           '\n' +
           `# Dynamic version generator\n` +
-          `npx ${packageName}${incrementFlag} 2>/dev/null || true\n`;
+          `${finalCommand} 2>/dev/null || true\n`;
 
         writeFileSync(hookPath, updatedContent);
         chmodSync(hookPath, '755');
