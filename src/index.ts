@@ -15,6 +15,7 @@ import {
 } from './script-manager';
 import {generateVersion} from './version-generator';
 
+// TODO: Refactor this to use prompts library
 async function promptUser(question: string): Promise<boolean> {
   const rl = readline.createInterface({
     input: process.stdin,
