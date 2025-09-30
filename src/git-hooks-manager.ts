@@ -1,3 +1,4 @@
+import {execSync} from 'child_process';
 import {chmodSync, existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
@@ -19,12 +20,37 @@ export function checkGitignore(): boolean {
   return content.includes('*.local.json') || content.includes('.local.json');
 }
 
+function getGitHooksPath(): string {
+  // Check if a custom hooks path is configured
+  try {
+    const customPath = execSync('git config core.hooksPath', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+
+    if (customPath) {
+      // If it's a relative path, resolve it relative to the git root
+      if (!customPath.startsWith('/')) {
+        return join(process.cwd(), customPath);
+      }
+      return customPath;
+    }
+  } catch {
+    // No custom hooks path configured, use default
+  }
+
+  // Default to .git/hooks
+  return join(process.cwd(), '.git', 'hooks');
+}
+
 export function installGitHooks(incrementPatch = false): void {
-  const gitHooksDir = join(process.cwd(), '.git', 'hooks');
+  const gitHooksDir = getGitHooksPath();
 
   if (!existsSync(gitHooksDir)) {
-    throw new Error('Not a git repository (no .git/hooks directory found)');
+    throw new Error(`Git hooks directory not found: ${gitHooksDir}`);
   }
+
+  console.log(`📦 Installing git hooks to: ${gitHooksDir}`);
 
   // Detect if we're running from the version-manager development directory itself
   const currentPackageJsonPath = join(process.cwd(), 'package.json');
@@ -50,7 +76,68 @@ export function installGitHooks(incrementPatch = false): void {
   const incrementFlag = incrementPatch ? ' --increment-patch' : '';
   const finalCommand = runCommand + incrementFlag;
 
-  const hookScript = `#!/bin/sh
+  // Check if we're using Husky
+  const isHusky = gitHooksDir.includes('.husky');
+
+  for (const hookName of HOOK_NAMES) {
+    const hookPath = join(gitHooksDir, hookName);
+    let hookContent: string;
+
+    if (isHusky) {
+      // For Husky, we need to check if it's the special _ directory
+      if (gitHooksDir.endsWith('/_')) {
+        // Skip the Husky internal directory - we should install in parent
+        console.log(
+          `   ⚠️  Detected Husky internal directory, installing to parent directory`,
+        );
+        const parentDir = join(gitHooksDir, '..');
+        const parentHookPath = join(parentDir, hookName);
+
+        hookContent = `#!/usr/bin/env sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Dynamic version generator
+${finalCommand} >/dev/null || true
+`;
+
+        writeFileSync(parentHookPath, hookContent);
+        chmodSync(parentHookPath, '755');
+        console.log(`   ✓ Created ${hookName} hook in Husky directory`);
+      } else {
+        // Regular Husky directory
+        hookContent = `#!/usr/bin/env sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Dynamic version generator
+${finalCommand} >/dev/null || true
+`;
+
+        if (existsSync(hookPath)) {
+          const existingContent = readFileSync(hookPath, 'utf-8');
+
+          if (existingContent.includes('version-manager')) {
+            writeFileSync(hookPath, hookContent);
+            chmodSync(hookPath, '755');
+            console.log(`   ✓ Updated ${hookName} hook`);
+          } else {
+            // Append to existing Husky hook
+            const updatedContent =
+              existingContent.trim() +
+              '\n\n# Dynamic version generator\n' +
+              `${finalCommand} >/dev/null || true\n`;
+            writeFileSync(hookPath, updatedContent);
+            chmodSync(hookPath, '755');
+            console.log(`   ✓ Appended to existing ${hookName} hook`);
+          }
+        } else {
+          writeFileSync(hookPath, hookContent);
+          chmodSync(hookPath, '755');
+          console.log(`   ✓ Created ${hookName} hook`);
+        }
+      }
+    } else {
+      // Regular git hooks
+      hookContent = `#!/bin/sh
 # Auto-generated hook by @justinhaaheim/version-manager
 # This hook updates the dynamic-version.local.json file
 
@@ -61,31 +148,29 @@ ${finalCommand} >/dev/null || true
 exit 0
 `;
 
-  for (const hookName of HOOK_NAMES) {
-    const hookPath = join(gitHooksDir, hookName);
+      if (existsSync(hookPath)) {
+        const existingContent = readFileSync(hookPath, 'utf-8');
 
-    if (existsSync(hookPath)) {
-      const existingContent = readFileSync(hookPath, 'utf-8');
+        if (existingContent.includes('version-manager')) {
+          writeFileSync(hookPath, hookContent);
+          chmodSync(hookPath, '755');
+          console.log(`   ✓ Updated ${hookName} hook`);
+        } else {
+          const updatedContent =
+            existingContent +
+            '\n' +
+            `# Dynamic version generator\n` +
+            `${finalCommand} >/dev/null || true\n`;
 
-      if (existingContent.includes('version-manager')) {
-        writeFileSync(hookPath, hookScript);
-        chmodSync(hookPath, '755');
-        console.log(`   ✓ Updated ${hookName} hook`);
+          writeFileSync(hookPath, updatedContent);
+          chmodSync(hookPath, '755');
+          console.log(`   ✓ Appended to existing ${hookName} hook`);
+        }
       } else {
-        const updatedContent =
-          existingContent +
-          '\n' +
-          `# Dynamic version generator\n` +
-          `${finalCommand} >/dev/null || true\n`;
-
-        writeFileSync(hookPath, updatedContent);
+        writeFileSync(hookPath, hookContent);
         chmodSync(hookPath, '755');
-        console.log(`   ✓ Appended to existing ${hookName} hook`);
+        console.log(`   ✓ Created ${hookName} hook`);
       }
-    } else {
-      writeFileSync(hookPath, hookScript);
-      chmodSync(hookPath, '755');
-      console.log(`   ✓ Created ${hookName} hook`);
     }
   }
 }
