@@ -54,8 +54,8 @@ export function installGitHooks(incrementPatch = false): void {
 # Auto-generated hook by @justinhaaheim/version-manager
 # This hook updates the dynamic-version.local.json file
 
-# Run the version generator
-${finalCommand} 2>/dev/null || true
+# Run the version generator silently
+${finalCommand} >/dev/null 2>&1 || true
 
 # Exit successfully regardless of version generator result
 exit 0
@@ -76,7 +76,7 @@ exit 0
           existingContent +
           '\n' +
           `# Dynamic version generator\n` +
-          `${finalCommand} 2>/dev/null || true\n`;
+          `${finalCommand} >/dev/null 2>&1 || true\n`;
 
         writeFileSync(hookPath, updatedContent);
         chmodSync(hookPath, '755');
