@@ -38,6 +38,7 @@ const fs_1 = require("fs");
 const path_1 = require("path");
 const readline = __importStar(require("readline"));
 const git_hooks_manager_1 = require("./git-hooks-manager");
+const git_utils_1 = require("./git-utils");
 const script_manager_1 = require("./script-manager");
 const version_generator_1 = require("./version-generator");
 async function promptUser(question) {
@@ -120,7 +121,31 @@ async function main() {
                 console.log('⚠️  Continuing without gitignore update. Be careful not to commit dynamic-version.local.json!');
             }
         }
-        // Generate version info
+        // Check if there are any git tags BEFORE generating version
+        const gitTags = await (0, git_utils_1.execCommand)('git tag -l');
+        const hasNoTags = gitTags.trim() === '';
+        // If no tags exist, offer to create one from package.json version
+        if (hasNoTags && !silent) {
+            const packageJson = (0, script_manager_1.readPackageJson)();
+            const version = packageJson?.version;
+            if (packageJson && typeof version === 'string') {
+                console.log('\n⚠️  No git tags found in this repository.');
+                console.log(`📦 Your package.json version is: ${version}`);
+                const shouldCreateTag = await promptUser(`Would you like to create an initial tag v${version}? (y/n): `);
+                if (shouldCreateTag) {
+                    try {
+                        const tagName = `v${version}`;
+                        await (0, git_utils_1.execCommand)(`git tag ${tagName}`);
+                        console.log(`✅ Created tag: ${tagName}`);
+                        console.log('   Note: Use "git push origin --tags" to push the tag to remote.\n');
+                    }
+                    catch (error) {
+                        console.error('❌ Failed to create tag:', error);
+                    }
+                }
+            }
+        }
+        // Generate version info (will now use the tag if we just created it)
         const versionInfo = await (0, version_generator_1.generateVersion)({ incrementPatch });
         // Write to dynamic-version.local.json
         const finalOutputPath = outputPath ?? (0, path_1.join)(process.cwd(), 'dynamic-version.local.json');

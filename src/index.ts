@@ -5,6 +5,7 @@ import {join} from 'path';
 import * as readline from 'readline';
 
 import {checkGitignore, installGitHooks} from './git-hooks-manager';
+import {execCommand} from './git-utils';
 import {
   addScriptsToPackageJson,
   getConflictingScripts,
@@ -101,7 +102,37 @@ async function main() {
       }
     }
 
-    // Generate version info
+    // Check if there are any git tags BEFORE generating version
+    const gitTags = await execCommand('git tag -l');
+    const hasNoTags = gitTags.trim() === '';
+
+    // If no tags exist, offer to create one from package.json version
+    if (hasNoTags && !silent) {
+      const packageJson = readPackageJson();
+      const version = packageJson?.version;
+      if (packageJson && typeof version === 'string') {
+        console.log('\n⚠️  No git tags found in this repository.');
+        console.log(`📦 Your package.json version is: ${version}`);
+        const shouldCreateTag = await promptUser(
+          `Would you like to create an initial tag v${version}? (y/n): `,
+        );
+
+        if (shouldCreateTag) {
+          try {
+            const tagName = `v${version}`;
+            await execCommand(`git tag ${tagName}`);
+            console.log(`✅ Created tag: ${tagName}`);
+            console.log(
+              '   Note: Use "git push origin --tags" to push the tag to remote.\n',
+            );
+          } catch (error) {
+            console.error('❌ Failed to create tag:', error);
+          }
+        }
+      }
+    }
+
+    // Generate version info (will now use the tag if we just created it)
     const versionInfo = await generateVersion({incrementPatch});
 
     // Write to dynamic-version.local.json
