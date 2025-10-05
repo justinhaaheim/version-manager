@@ -1,5 +1,2 @@
-#!/usr/bin/env sh
-. "$(dirname "$0")/_/husky.sh"
-
 # Dynamic version generator
-bun run test:local >/dev/null || true
+bun run test:local --silent --no-fail

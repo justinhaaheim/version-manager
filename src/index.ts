@@ -43,6 +43,7 @@ Options:
   --increment-patch   Increment patch version with each commit
   -o, --output <path> Output file path (default: ./dynamic-version.local.json)
   -s, --silent        Suppress console output
+  --no-fail           Always exit with code 0, even on errors (still prints errors to stderr)
   -h, --help          Show help
 
 Examples:
@@ -73,6 +74,9 @@ async function main() {
         outputPath = args[++i];
       } else if (args[i] === '--silent' || args[i] === '-s') {
         silent = true;
+      } else if (args[i] === '--no-fail') {
+        // Flag is parsed but handled in catch block via process.argv
+        continue;
       } else if (args[i] === '--help' || args[i] === '-h') {
         printHelp();
         process.exit(0);
@@ -260,7 +264,10 @@ async function main() {
     } else {
       console.error('❌ Failed to generate version info:', error);
     }
-    process.exit(1);
+
+    // Check if noFail flag was set (need to re-parse since we're in catch block)
+    const hasNoFail = process.argv.includes('--no-fail');
+    process.exit(hasNoFail ? 0 : 1);
   }
 }
 
@@ -268,6 +275,7 @@ async function main() {
 if (require.main === module) {
   main().catch((error) => {
     console.error('Unexpected error:', error);
-    process.exit(1);
+    const hasNoFail = process.argv.includes('--no-fail');
+    process.exit(hasNoFail ? 0 : 1);
   });
 }

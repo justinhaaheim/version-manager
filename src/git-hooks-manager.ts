@@ -74,7 +74,7 @@ export function installGitHooks(incrementPatch = false): void {
   }
 
   const incrementFlag = incrementPatch ? ' --increment-patch' : '';
-  const finalCommand = runCommand + incrementFlag;
+  const finalCommand = `${runCommand}${incrementFlag} --silent --no-fail`;
 
   // Check if we're using Husky
   const isHusky = gitHooksDir.includes('.husky');
@@ -93,11 +93,8 @@ export function installGitHooks(incrementPatch = false): void {
         const parentDir = join(gitHooksDir, '..');
         const parentHookPath = join(parentDir, hookName);
 
-        hookContent = `#!/usr/bin/env sh
-. "$(dirname "$0")/_/husky.sh"
-
-# Dynamic version generator
-${finalCommand} >/dev/null || true
+        hookContent = `# Dynamic version generator
+${finalCommand}
 `;
 
         writeFileSync(parentHookPath, hookContent);
@@ -105,11 +102,8 @@ ${finalCommand} >/dev/null || true
         console.log(`   ✓ Created ${hookName} hook in Husky directory`);
       } else {
         // Regular Husky directory
-        hookContent = `#!/usr/bin/env sh
-. "$(dirname "$0")/_/husky.sh"
-
-# Dynamic version generator
-${finalCommand} >/dev/null || true
+        hookContent = `# Dynamic version generator
+${finalCommand}
 `;
 
         if (existsSync(hookPath)) {
@@ -124,7 +118,7 @@ ${finalCommand} >/dev/null || true
             const updatedContent =
               existingContent.trim() +
               '\n\n# Dynamic version generator\n' +
-              `${finalCommand} >/dev/null || true\n`;
+              `${finalCommand}\n`;
             writeFileSync(hookPath, updatedContent);
             chmodSync(hookPath, '755');
             console.log(`   ✓ Appended to existing ${hookName} hook`);
@@ -141,11 +135,7 @@ ${finalCommand} >/dev/null || true
 # Auto-generated hook by @justinhaaheim/version-manager
 # This hook updates the dynamic-version.local.json file
 
-# Run the version generator (suppress stdout, show errors)
-${finalCommand} >/dev/null || true
-
-# Exit successfully regardless of version generator result
-exit 0
+${finalCommand}
 `;
 
       if (existsSync(hookPath)) {
@@ -160,7 +150,7 @@ exit 0
             existingContent +
             '\n' +
             `# Dynamic version generator\n` +
-            `${finalCommand} >/dev/null || true\n`;
+            `${finalCommand}\n`;
 
           writeFileSync(hookPath, updatedContent);
           chmodSync(hookPath, '755');
