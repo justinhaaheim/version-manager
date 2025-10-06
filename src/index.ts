@@ -67,10 +67,10 @@ async function main() {
         description: 'Suppress console output',
         type: 'boolean',
       })
-      .option('no-fail', {
-        default: false,
+      .option('fail', {
+        default: true,
         description:
-          'Always exit with code 0, even on errors (still prints errors to stderr)',
+          'Exit with error code on failures (use --no-fail to always exit 0)',
         type: 'boolean',
       })
       .help()
