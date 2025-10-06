@@ -1,2 +1,2 @@
 # Dynamic version generator
-bun run test:local --silent --no-fail
+bun run test:local --no-fail
