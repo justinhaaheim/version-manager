@@ -3,6 +3,8 @@
 import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 import * as readline from 'readline';
+import {hideBin} from 'yargs/helpers';
+import yargs from 'yargs/yargs';
 
 import {checkGitignore, installGitHooks} from './git-hooks-manager';
 import {execCommand} from './git-utils';
@@ -30,58 +32,64 @@ async function promptUser(question: string): Promise<boolean> {
   });
 }
 
-function printHelp() {
-  console.log(`
-@justinhaaheim/version-manager - Git hooks-based dynamic version generator
-
-Usage:
-  npx @justinhaaheim/version-manager [options]
-
-Options:
-  --install           Install git hooks, generate version file, and add scripts to package.json
-  --install-scripts   Add/update dynamic-version scripts in package.json
-  --increment-patch   Increment patch version with each commit
-  -o, --output <path> Output file path (default: ./dynamic-version.local.json)
-  -s, --silent        Suppress console output
-  --no-fail           Always exit with code 0, even on errors (still prints errors to stderr)
-  -h, --help          Show help
-
-Examples:
-  npx @justinhaaheim/version-manager              # Generate version file only
-  npx @justinhaaheim/version-manager --install    # Full installation (hooks + scripts)
-  npx @justinhaaheim/version-manager --install --increment-patch
-  npx @justinhaaheim/version-manager --install-scripts  # Add/update scripts only
-`);
-}
-
 async function main() {
   try {
-    const args = process.argv.slice(2);
-    let shouldInstall = false;
-    let shouldInstallScripts = false;
-    let incrementPatch = false;
-    let outputPath: string | undefined;
-    let silent = false;
+    const argv = await yargs(hideBin(process.argv))
+      .scriptName('npx @justinhaaheim/version-manager')
+      .usage(
+        '$0 [options]\n\nGit hooks-based dynamic version generator for JavaScript/TypeScript projects',
+      )
+      .option('install', {
+        default: false,
+        description:
+          'Install git hooks, generate version file, and add scripts to package.json',
+        type: 'boolean',
+      })
+      .option('install-scripts', {
+        default: false,
+        description: 'Add/update dynamic-version scripts in package.json',
+        type: 'boolean',
+      })
+      .option('increment-patch', {
+        default: false,
+        description: 'Increment patch version with each commit',
+        type: 'boolean',
+      })
+      .option('output', {
+        alias: 'o',
+        default: './dynamic-version.local.json',
+        description: 'Output file path',
+        type: 'string',
+      })
+      .option('silent', {
+        alias: 's',
+        default: false,
+        description: 'Suppress console output',
+        type: 'boolean',
+      })
+      .option('no-fail', {
+        default: false,
+        description:
+          'Always exit with code 0, even on errors (still prints errors to stderr)',
+        type: 'boolean',
+      })
+      .help()
+      .alias('help', 'h')
+      .version()
+      .alias('version', 'v')
+      .example('$0', 'Generate version file only')
+      .example('$0 --install', 'Full installation (hooks + scripts)')
+      .example('$0 --install --increment-patch', 'Install with patch increment')
+      .example('$0 --install-scripts', 'Add/update scripts only')
+      .strict()
+      .parseAsync();
 
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === '--install') {
-        shouldInstall = true;
-      } else if (args[i] === '--install-scripts') {
-        shouldInstallScripts = true;
-      } else if (args[i] === '--increment-patch') {
-        incrementPatch = true;
-      } else if (args[i] === '--output' || args[i] === '-o') {
-        outputPath = args[++i];
-      } else if (args[i] === '--silent' || args[i] === '-s') {
-        silent = true;
-      } else if (args[i] === '--no-fail') {
-        // Flag is parsed but handled in catch block via process.argv
-        continue;
-      } else if (args[i] === '--help' || args[i] === '-h') {
-        printHelp();
-        process.exit(0);
-      }
-    }
+    const shouldInstall = argv.install;
+    const shouldInstallScripts = argv['install-scripts'];
+    const incrementPatch = argv['increment-patch'];
+    const outputPath = argv.output;
+    const silent = argv.silent;
+    // Note: no-fail is handled in catch blocks via process.argv check
 
     // Check if .local.json is in .gitignore
     const gitignoreOk = checkGitignore();
@@ -265,7 +273,7 @@ async function main() {
       console.error('❌ Failed to generate version info:', error);
     }
 
-    // Check if noFail flag was set (need to re-parse since we're in catch block)
+    // Check if noFail flag was set
     const hasNoFail = process.argv.includes('--no-fail');
     process.exit(hasNoFail ? 0 : 1);
   }

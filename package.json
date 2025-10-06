@@ -45,9 +45,12 @@
     "test:local:help": "bun src/index.ts --help",
     "test:local:install": "bun src/index.ts --install"
   },
-  "dependencies": {},
+  "dependencies": {
+    "yargs": "18.0.0"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/yargs": "17.0.33",
     "concurrently": "8.2.1",
     "eslint": "9.31.0",
     "eslint-config-jha-react-node": "github:justinhaaheim/eslint-config-jha-react-node",
