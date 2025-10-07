@@ -70,3 +70,58 @@ Replace manual argument parsing with yargs for better CLI UX, validation, and he
 - --silent / -s
 - --no-fail
 - Unknown flags properly rejected
+
+## Phase 2: Commands vs Flags
+
+### Goal
+
+Refactor to use commands instead of flags for better UX (like `npm install`, not `npm --install`)
+
+### Structure
+
+- **Default command**: Generate version file
+- **`install` command**: Install git hooks + scripts
+- **`install-scripts` command**: Add/update scripts only
+
+### Flags behavior
+
+- Global flags: `--output`, `--silent`, `--no-fail` (work on all commands)
+- Command-specific: `--increment-patch` (only on install)
+- Pass-through: `install --silent --no-fail` → hooks run with those flags
+
+### Benefits
+
+- More intuitive (`version-manager install` vs `version-manager --install`)
+- Industry standard pattern
+- Better help organization
+- Cleaner command-specific options
+
+### Implementation
+
+- Use yargs `.command()` for each command
+- Default command handler for version generation
+- Move install logic to command handlers
+- Update git-hooks-manager to accept silent/noFail parameters
+
+## Phase 2 Completed
+
+✅ Refactored to command-based CLI (install, install-scripts, default)
+✅ Updated git-hooks-manager.ts to accept silent and noFail parameters
+✅ Hooks now use flags based on install command (pass-through behavior)
+✅ Fixed all TypeScript/ESLint errors
+✅ Tested all commands and flag combinations:
+
+- `npx version-manager` → generates version file (verbose)
+- `npx version-manager --silent` → generates quietly
+- `npx version-manager install` → installs with verbose hooks (can fail)
+- `npx version-manager install --silent` → installs with silent hooks
+- `npx version-manager install --no-fail` → installs with no-fail hooks
+- `npx version-manager install --silent --no-fail` → installs with both flags
+- `npx version-manager install --increment-patch` → installs with patch increment
+- `npx version-manager install-scripts` → adds/updates scripts only
+
+Hook behavior verification:
+
+- No flags → `bun run test:local` (verbose, can fail)
+- `--silent` → `bun run test:local --silent`
+- `--silent --no-fail` → `bun run test:local --silent --no-fail`

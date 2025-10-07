@@ -43,7 +43,11 @@ function getGitHooksPath(): string {
   return join(process.cwd(), '.git', 'hooks');
 }
 
-export function installGitHooks(incrementPatch = false): void {
+export function installGitHooks(
+  incrementPatch = false,
+  silent = false,
+  noFail = false,
+): void {
   const gitHooksDir = getGitHooksPath();
 
   if (!existsSync(gitHooksDir)) {
@@ -74,7 +78,9 @@ export function installGitHooks(incrementPatch = false): void {
   }
 
   const incrementFlag = incrementPatch ? ' --increment-patch' : '';
-  const finalCommand = `${runCommand}${incrementFlag} --silent --no-fail`;
+  const silentFlag = silent ? ' --silent' : '';
+  const noFailFlag = noFail ? ' --no-fail' : '';
+  const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}`;
 
   // Check if we're using Husky
   const isHusky = gitHooksDir.includes('.husky');
