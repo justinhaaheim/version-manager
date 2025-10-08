@@ -1,0 +1,5 @@
+{
+  "codeVersionBase": "0.1.0",
+  "runtimeVersion": "0.1.0",
+  "versionCalculationMode": "append-commits"
+}
