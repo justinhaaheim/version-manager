@@ -18,4 +18,15 @@ export interface GenerateVersionOptions {
     outputPath?: string;
     silent?: boolean;
 }
+export type VersionCalculationMode = 'add-to-patch' | 'append-commits';
+export interface VersionManagerConfig {
+    codeVersionBase: string;
+    runtimeVersion: string;
+    versionCalculationMode: VersionCalculationMode;
+}
+export interface DynamicVersion {
+    buildNumber?: string;
+    codeVersion: string;
+    runtimeVersion: string;
+}
 //# sourceMappingURL=types.d.ts.map

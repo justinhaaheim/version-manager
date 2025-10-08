@@ -20,3 +20,18 @@ export interface GenerateVersionOptions {
   outputPath?: string;
   silent?: boolean;
 }
+
+// New file-based versioning types
+export type VersionCalculationMode = 'add-to-patch' | 'append-commits';
+
+export interface VersionManagerConfig {
+  codeVersionBase: string;
+  runtimeVersion: string;
+  versionCalculationMode: VersionCalculationMode;
+}
+
+export interface DynamicVersion {
+  buildNumber?: string;
+  codeVersion: string;
+  runtimeVersion: string;
+}

@@ -7,7 +7,6 @@ import {hideBin} from 'yargs/helpers';
 import yargs from 'yargs/yargs';
 
 import {checkGitignore, installGitHooks} from './git-hooks-manager';
-import {execCommand} from './git-utils';
 import {
   addScriptsToPackageJson,
   getConflictingScripts,
@@ -15,7 +14,10 @@ import {
   listDefaultScripts,
   readPackageJson,
 } from './script-manager';
-import {generateVersion} from './version-generator';
+import {
+  createDefaultVersionManagerConfig,
+  generateFileBasedVersion,
+} from './version-generator';
 
 // TODO: Refactor this to use prompts library
 async function promptUser(question: string): Promise<boolean> {
@@ -58,7 +60,6 @@ const globalOptions = {
 async function generateVersionFile(
   outputPath: string,
   silent: boolean,
-  incrementPatch: boolean,
 ): Promise<void> {
   // Check if .local.json is in .gitignore
   const gitignoreOk = checkGitignore();
@@ -84,51 +85,42 @@ async function generateVersionFile(
     }
   }
 
-  // Check if there are any git tags BEFORE generating version
-  const gitTags = await execCommand('git tag -l');
-  const hasNoTags = gitTags.trim() === '';
+  // Check if version-manager.json exists
+  const versionManagerPath = join(process.cwd(), 'version-manager.json');
+  if (!existsSync(versionManagerPath) && !silent) {
+    console.log('\n⚠️  version-manager.json not found.');
+    const shouldCreate = await promptUser(
+      'Would you like to create it with default values? (y/n): ',
+    );
 
-  // If no tags exist, offer to create one from package.json version
-  if (hasNoTags && !silent) {
-    const packageJson = readPackageJson();
-    const version = packageJson?.version;
-    if (packageJson && typeof version === 'string') {
-      console.log('\n⚠️  No git tags found in this repository.');
-      console.log(`📦 Your package.json version is: ${version}`);
-      const shouldCreateTag = await promptUser(
-        `Would you like to create an initial tag v${version}? (y/n): `,
+    if (shouldCreate) {
+      createDefaultVersionManagerConfig(versionManagerPath, silent);
+      console.log(
+        '\n   💡 Tip: Commit version-manager.json to track your base versions.',
       );
-
-      if (shouldCreateTag) {
-        try {
-          const tagName = `v${version}`;
-          await execCommand(`git tag ${tagName}`);
-          console.log(`✅ Created tag: ${tagName}`);
-          console.log(
-            '   Note: Use "git push origin --tags" to push the tag to remote.\n',
-          );
-        } catch (error) {
-          console.error('❌ Failed to create tag:', error);
-        }
-      }
+    } else {
+      console.log(
+        '   ℹ️  Continuing without version-manager.json. Using default version 0.1.0.',
+      );
     }
   }
 
-  // Generate version info (will now use the tag if we just created it)
-  const versionInfo = await generateVersion({incrementPatch});
+  // Generate version info using file-based approach
+  const versionInfo = await generateFileBasedVersion();
 
   // Write to dynamic-version.local.json
   const finalOutputPath =
     outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
-  writeFileSync(finalOutputPath, JSON.stringify(versionInfo, null, 2));
+  writeFileSync(finalOutputPath, JSON.stringify(versionInfo, null, 2) + '\n');
 
   if (!silent) {
-    console.log(`✅ Version info generated: ${versionInfo.humanReadable}`);
-    console.log(`📝 Written to: ${finalOutputPath}`);
-
-    if (versionInfo.dirty) {
-      console.log('⚠️  Warning: Uncommitted changes detected');
+    console.log(`✅ Version generated:`);
+    console.log(`   Code version: ${versionInfo.codeVersion}`);
+    console.log(`   Runtime version: ${versionInfo.runtimeVersion}`);
+    if (versionInfo.buildNumber) {
+      console.log(`   Build number: ${versionInfo.buildNumber}`);
     }
+    console.log(`📝 Written to: ${finalOutputPath}`);
   }
 }
 
@@ -140,7 +132,7 @@ async function installCommand(
   noFail: boolean,
 ): Promise<void> {
   // First, generate the version file
-  await generateVersionFile(outputPath, silent, incrementPatch);
+  await generateVersionFile(outputPath, silent);
 
   if (!silent) {
     console.log('\n📦 Installing git hooks...');
@@ -254,11 +246,7 @@ async function main() {
         'Generate version file',
         (yargsInstance) => yargsInstance.options(globalOptions),
         async (args) => {
-          await generateVersionFile(
-            args.output,
-            args.silent,
-            false, // incrementPatch only applies to install
-          );
+          await generateVersionFile(args.output, args.silent);
         },
       )
       .command(

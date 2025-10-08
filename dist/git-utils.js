@@ -5,6 +5,8 @@ exports.isGitRepository = isGitRepository;
 exports.getGitDescribe = getGitDescribe;
 exports.getCurrentBranch = getCurrentBranch;
 exports.hasUncommittedChanges = hasUncommittedChanges;
+exports.findLastCommitWhereFieldChanged = findLastCommitWhereFieldChanged;
+exports.countCommitsBetween = countCommitsBetween;
 const child_process_1 = require("child_process");
 const util_1 = require("util");
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
@@ -52,6 +54,75 @@ async function hasUncommittedChanges() {
     }
     catch {
         return false;
+    }
+}
+/**
+ * Find the last commit where a specific field value changed in a JSON file
+ * @param filePath - Path to the JSON file (relative to repo root)
+ * @param fieldName - Name of the field to track (e.g., 'codeVersionBase')
+ * @returns The commit hash where the field last changed, or null if not found
+ */
+async function findLastCommitWhereFieldChanged(filePath, fieldName) {
+    try {
+        // Get all commits that touched this file
+        const commitList = await execCommand(`git log --format=%H -- ${filePath}`);
+        if (!commitList) {
+            return null; // File has never been committed
+        }
+        const commits = commitList.split('\n').filter(Boolean);
+        if (commits.length === 0) {
+            return null;
+        }
+        // Get current value of the field
+        let currentValue;
+        try {
+            const currentContent = await execCommand(`git show HEAD:${filePath}`);
+            const currentJson = JSON.parse(currentContent);
+            currentValue = currentJson[fieldName];
+        }
+        catch {
+            // If we can't read current value, return the first commit
+            return commits[0];
+        }
+        // Walk backwards through commits to find where value changed
+        for (let i = 0; i < commits.length; i++) {
+            const commit = commits[i];
+            try {
+                const content = await execCommand(`git show ${commit}:${filePath}`);
+                const json = JSON.parse(content);
+                const value = json[fieldName];
+                // If value differs from current, this is where it last changed
+                if (value !== currentValue) {
+                    // Return the commit AFTER this one (where the change happened)
+                    return i > 0 ? commits[i - 1] : commits[0];
+                }
+            }
+            catch {
+                // If we can't parse JSON from this commit, skip it
+                continue;
+            }
+        }
+        // If we've gone through all commits and value never changed,
+        // return the oldest commit (where it was first set)
+        return commits[commits.length - 1];
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Count commits between two refs
+ * @param fromRef - Starting commit hash or ref
+ * @param toRef - Ending commit hash or ref
+ * @returns Number of commits between the two refs
+ */
+async function countCommitsBetween(fromRef, toRef) {
+    try {
+        const count = await execCommand(`git rev-list --count ${fromRef}..${toRef}`);
+        return parseInt(count, 10);
+    }
+    catch {
+        return 0;
     }
 }
 //# sourceMappingURL=git-utils.js.map

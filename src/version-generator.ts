@@ -1,6 +1,21 @@
-import type {VersionComponents, VersionInfo} from './types';
+import type {
+  DynamicVersion,
+  VersionCalculationMode,
+  VersionComponents,
+  VersionInfo,
+  VersionManagerConfig,
+} from './types';
 
-import {getCurrentBranch, getGitDescribe, isGitRepository} from './git-utils';
+import {existsSync, readFileSync, writeFileSync} from 'fs';
+import {join} from 'path';
+
+import {
+  countCommitsBetween,
+  findLastCommitWhereFieldChanged,
+  getCurrentBranch,
+  getGitDescribe,
+  isGitRepository,
+} from './git-utils';
 
 function parseGitDescribe(describe: string): VersionComponents | null {
   const cleanDescribe = describe.replace('-dirty', '');
@@ -111,4 +126,168 @@ export async function generateVersion(
     timestamp: new Date().toISOString(),
     version,
   };
+}
+
+/**
+ * Read version-manager.json configuration
+ * @param configPath - Path to version-manager.json
+ * @returns Configuration object or null if not found
+ */
+function readVersionManagerConfig(
+  configPath: string,
+): VersionManagerConfig | null {
+  try {
+    if (!existsSync(configPath)) {
+      return null;
+    }
+
+    const content = readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(content) as VersionManagerConfig;
+
+    // Validate required fields
+    if (
+      !config.codeVersionBase ||
+      !config.runtimeVersion ||
+      !config.versionCalculationMode
+    ) {
+      return null;
+    }
+
+    return config;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Calculate code version based on calculation mode
+ * @param baseVersion - Base version from config
+ * @param commitsSince - Number of commits since last base version change
+ * @param mode - Calculation mode
+ * @returns Calculated code version
+ */
+function calculateCodeVersion(
+  baseVersion: string,
+  commitsSince: number,
+  mode: VersionCalculationMode,
+): string {
+  if (commitsSince === 0) {
+    return baseVersion;
+  }
+
+  if (mode === 'add-to-patch') {
+    // Mode A: Add commits to patch version
+    const parts = baseVersion.split('.');
+    if (parts.length !== 3) {
+      return baseVersion; // Invalid semver format
+    }
+
+    const [major, minor, patch] = parts.map(Number);
+    if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
+      return baseVersion; // Invalid semver format
+    }
+
+    return `${major}.${minor}.${patch + commitsSince}`;
+  } else if (mode === 'append-commits') {
+    // Mode B: Append commit count
+    return `${baseVersion}+${commitsSince}`;
+  }
+
+  // Fallback to mode A if unrecognized mode
+  const parts = baseVersion.split('.');
+  if (parts.length !== 3) {
+    return baseVersion;
+  }
+
+  const [major, minor, patch] = parts.map(Number);
+  if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
+    return baseVersion;
+  }
+
+  return `${major}.${minor}.${patch + commitsSince}`;
+}
+
+/**
+ * Create default version-manager.json configuration
+ * @param configPath - Path to version-manager.json
+ * @param silent - Suppress console output
+ */
+export function createDefaultVersionManagerConfig(
+  configPath: string,
+  silent = false,
+): void {
+  const defaultConfig: VersionManagerConfig = {
+    codeVersionBase: '0.1.0',
+    runtimeVersion: '0.1.0',
+    versionCalculationMode: 'add-to-patch',
+  };
+
+  writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2) + '\n');
+
+  if (!silent) {
+    console.log('✅ Created version-manager.json with default values:');
+    console.log(`   codeVersionBase: ${defaultConfig.codeVersionBase}`);
+    console.log(`   runtimeVersion: ${defaultConfig.runtimeVersion}`);
+    console.log(
+      `   versionCalculationMode: ${defaultConfig.versionCalculationMode}`,
+    );
+  }
+}
+
+/**
+ * Generate dynamic version using file-based approach
+ * @returns DynamicVersion object
+ */
+export async function generateFileBasedVersion(): Promise<DynamicVersion> {
+  const configPath = join(process.cwd(), 'version-manager.json');
+
+  // Check if in git repository
+  const isRepo = await isGitRepository();
+  if (!isRepo) {
+    throw new Error(
+      'Not a git repository. Please run this command in a git project.',
+    );
+  }
+
+  // Read config (will be null if doesn't exist)
+  const config = readVersionManagerConfig(configPath);
+
+  if (!config) {
+    // Return default version if config doesn't exist
+    return {
+      codeVersion: '0.1.0',
+      runtimeVersion: '0.1.0',
+    };
+  }
+
+  // Find last commit where codeVersionBase changed
+  const lastCommit = await findLastCommitWhereFieldChanged(
+    'version-manager.json',
+    'codeVersionBase',
+  );
+
+  // Count commits since last change
+  const commitsSince = lastCommit
+    ? await countCommitsBetween(lastCommit, 'HEAD')
+    : 0;
+
+  // Calculate code version
+  const codeVersion = calculateCodeVersion(
+    config.codeVersionBase,
+    commitsSince,
+    config.versionCalculationMode,
+  );
+
+  // Build result
+  const result: DynamicVersion = {
+    codeVersion,
+    runtimeVersion: config.runtimeVersion,
+  };
+
+  // Add BUILD_NUMBER from environment if present
+  if (process.env.BUILD_NUMBER) {
+    result.buildNumber = process.env.BUILD_NUMBER;
+  }
+
+  return result;
 }
