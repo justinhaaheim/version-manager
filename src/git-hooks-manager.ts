@@ -9,6 +9,30 @@ const HOOK_NAMES = [
   'post-rewrite',
 ];
 
+/**
+ * Detect which package manager to use based on lock files
+ * @returns 'bun' if bun.lock exists, 'npm' if package-lock.json exists,
+ *          or 'npm' with warning if neither exists
+ */
+export function detectPackageManager(): 'bun' | 'npm' {
+  const hasBunLock = existsSync(join(process.cwd(), 'bun.lock'));
+  const hasNpmLock = existsSync(join(process.cwd(), 'package-lock.json'));
+
+  if (hasBunLock) {
+    return 'bun';
+  }
+
+  if (hasNpmLock) {
+    return 'npm';
+  }
+
+  // Neither lock file exists - warn and default to npm
+  console.warn(
+    '⚠️  No bun.lock or package-lock.json found. Defaulting to npm.',
+  );
+  return 'npm';
+}
+
 export function checkGitignore(): boolean {
   const gitignorePath = join(process.cwd(), '.gitignore');
 
@@ -56,13 +80,20 @@ function ensureHuskyInstalled(silent = false): void {
     return;
   }
 
+  const packageManager = detectPackageManager();
+
   if (!silent) {
-    console.log('   📦 Installing Husky...');
+    console.log(`   📦 Installing Husky using ${packageManager}...`);
   }
 
   try {
-    // Install husky as dev dependency
-    execSync('npm install --save-dev husky', {
+    // Install husky as dev dependency using detected package manager
+    const installCmd =
+      packageManager === 'bun'
+        ? 'bun add --dev husky'
+        : 'npm install --save-dev husky';
+
+    execSync(installCmd, {
       cwd: process.cwd(),
       stdio: silent ? 'pipe' : 'inherit',
     });
@@ -73,6 +104,7 @@ function ensureHuskyInstalled(silent = false): void {
     }
 
     // Run husky init to set up .husky directory and prepare script
+    // Use npx for both package managers (bunx doesn't support husky init well)
     execSync('npx husky init', {
       cwd: process.cwd(),
       stdio: silent ? 'pipe' : 'inherit',
@@ -156,11 +188,8 @@ function createNewHook(
   hookName: string,
   silent: boolean,
 ): void {
-  // Husky hook template
-  const hookContent = `#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
-# Dynamic version generator
+  // Husky hook template (modern format - no longer needs husky.sh sourcing)
+  const hookContent = `# Dynamic version generator
 ${command}
 `;
 
