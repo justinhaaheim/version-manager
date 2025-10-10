@@ -13,8 +13,8 @@ import * as os from 'os';
 import * as path from 'path';
 
 interface FixtureConfig {
-  name: string;
   description: string;
+  name: string;
   setup: (repoPath: string) => void;
 }
 
@@ -156,7 +156,7 @@ const fixtures: FixtureConfig[] = [
 /**
  * Main execution
  */
-async function main() {
+function main() {
   console.log('🔧 Creating test fixture repositories...\n');
 
   // Ensure fixtures directory exists
@@ -198,7 +198,9 @@ async function main() {
 }
 
 // Run the script
-main().catch((error) => {
+try {
+  main();
+} catch (error: unknown) {
   console.error('Failed to create fixtures:', error);
   process.exit(1);
-});
+}

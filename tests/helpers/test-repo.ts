@@ -5,7 +5,7 @@ import * as path from 'path';
 
 export interface CliResult {
   exitCode: number;
-  json?: any;
+  json?: unknown;
   stderr: string;
   stdout: string;
 }
@@ -70,7 +70,7 @@ export class TestRepo {
   /**
    * Run version-manager CLI in this repository
    */
-  async runCli(command: string): Promise<CliResult> {
+  runCli(command: string): CliResult {
     const cliPath = path.join(__dirname, '..', '..', 'src', 'index.ts');
 
     // Parse command to handle flags
@@ -92,7 +92,7 @@ export class TestRepo {
       });
 
       // Try to parse as JSON if it looks like JSON
-      let json;
+      let json: unknown;
       try {
         json = JSON.parse(stdout);
       } catch {
@@ -105,11 +105,18 @@ export class TestRepo {
         stderr: '',
         stdout,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      // Type guard for execSync error with status, stderr, and stdout properties
+      const err = error as {
+        status?: number;
+        stderr?: Buffer | string;
+        stdout?: Buffer | string;
+      };
+
       return {
-        exitCode: error.status || 1,
-        stderr: error.stderr?.toString() || '',
-        stdout: error.stdout?.toString() || '',
+        exitCode: err.status ?? 1,
+        stderr: err.stderr?.toString() ?? '',
+        stdout: err.stdout?.toString() ?? '',
       };
     }
   }
@@ -174,8 +181,10 @@ export class TestRepo {
         },
         stdio: 'ignore',
       });
-    } catch (error) {
-      throw new Error(`Failed to make commit: ${error}`);
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to make commit: ${errorMessage}`);
     }
   }
 

@@ -16,6 +16,7 @@ import {
   getGitDescribe,
   isGitRepository,
 } from './git-utils';
+import {VersionManagerConfigSchema} from './types';
 
 function parseGitDescribe(describe: string): VersionComponents | null {
   const cleanDescribe = describe.replace('-dirty', '');
@@ -129,9 +130,9 @@ export async function generateVersion(
 }
 
 /**
- * Read version-manager.json configuration
+ * Read version-manager.json configuration with Zod validation
  * @param configPath - Path to version-manager.json
- * @returns Configuration object or null if not found
+ * @returns Configuration object or null if not found/invalid
  */
 function readVersionManagerConfig(
   configPath: string,
@@ -142,19 +143,22 @@ function readVersionManagerConfig(
     }
 
     const content = readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(content) as VersionManagerConfig;
+    const json: unknown = JSON.parse(content);
 
-    // Validate required fields
-    if (
-      !config.codeVersionBase ||
-      !config.runtimeVersion ||
-      !config.versionCalculationMode
-    ) {
+    // Use Zod to validate the config
+    const result = VersionManagerConfigSchema.safeParse(json);
+
+    if (!result.success) {
+      console.warn(
+        `⚠️  Invalid version-manager.json format:`,
+        result.error.format(),
+      );
       return null;
     }
 
-    return config;
-  } catch {
+    return result.data;
+  } catch (error) {
+    console.warn(`⚠️  Failed to read version-manager.json:`, error);
     return null;
   }
 }

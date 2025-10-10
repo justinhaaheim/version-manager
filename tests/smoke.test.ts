@@ -33,10 +33,10 @@ describe('Test Infrastructure', () => {
     expect(repo.fileExists('README.md')).toBe(true);
   });
 
-  test('can run CLI in test repo', async () => {
+  test('can run CLI in test repo', () => {
     setupRepoWithVersionConfig(repo);
 
-    const result = await repo.runCli('--help');
+    const result = repo.runCli('--help');
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('version-manager');

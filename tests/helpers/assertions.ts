@@ -2,25 +2,34 @@ import type {DynamicVersion} from '../../src/types';
 
 import {expect} from 'bun:test';
 import * as fs from 'fs';
+import {z} from 'zod';
+
+import {DynamicVersionSchema} from '../../src/types';
+
+// Schema for validating package.json with version-manager scripts
+const PackageJsonWithScriptsSchema = z.object({
+  scripts: z.object({
+    'dynamic-version': z.string(),
+    'dynamic-version:generate': z.string(),
+    'dynamic-version:install-scripts': z.string(),
+  }),
+});
 
 /**
  * Assert that a JSON object is a valid DynamicVersion
  */
 export function assertValidVersionJson(
-  json: any,
+  json: unknown,
 ): asserts json is DynamicVersion {
-  expect(json).toBeDefined();
-  expect(typeof json).toBe('object');
-  expect(json).toHaveProperty('codeVersion');
-  expect(json).toHaveProperty('runtimeVersion');
+  // Use Zod to validate and assert the structure
+  const result = DynamicVersionSchema.safeParse(json);
 
-  // Validate types
-  expect(typeof json.codeVersion).toBe('string');
-  expect(typeof json.runtimeVersion).toBe('string');
+  expect(result.success).toBe(true);
 
-  // buildNumber is optional but should be string if present
-  if (json.buildNumber !== undefined) {
-    expect(typeof json.buildNumber).toBe('string');
+  if (!result.success) {
+    throw new Error(
+      `Invalid DynamicVersion: ${JSON.stringify(result.error.format())}`,
+    );
   }
 }
 
@@ -112,9 +121,17 @@ export function assertHookContainsSingleMatch(
 export function assertPackageHasVersionScripts(packageJsonPath: string): void {
   expect(fs.existsSync(packageJsonPath)).toBe(true);
 
-  const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-  expect(pkg.scripts).toBeDefined();
-  expect(pkg.scripts).toHaveProperty('dynamic-version');
-  expect(pkg.scripts).toHaveProperty('dynamic-version:generate');
-  expect(pkg.scripts).toHaveProperty('dynamic-version:install-scripts');
+  const content = fs.readFileSync(packageJsonPath, 'utf-8');
+  const json: unknown = JSON.parse(content);
+
+  // Use Zod to validate the package.json structure
+  const result = PackageJsonWithScriptsSchema.safeParse(json);
+
+  expect(result.success).toBe(true);
+
+  if (!result.success) {
+    throw new Error(
+      `Invalid package.json structure: ${JSON.stringify(result.error.format())}`,
+    );
+  }
 }

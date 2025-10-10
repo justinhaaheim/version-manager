@@ -1,37 +1,55 @@
-export interface VersionInfo {
-  branch: string;
-  components: VersionComponents | null;
-  describe: string;
-  dirty: boolean;
-  error?: boolean;
-  humanReadable: string;
-  timestamp: string;
-  version: string;
-}
+import {z} from 'zod';
 
-export interface VersionComponents {
-  baseVersion: string;
-  commitsSince: number;
-  shortHash: string;
-}
+// Zod schemas for runtime validation
+export const VersionComponentsSchema = z.object({
+  baseVersion: z.string(),
+  commitsSince: z.number(),
+  shortHash: z.string(),
+});
 
-export interface GenerateVersionOptions {
-  incrementPatch?: boolean;
-  outputPath?: string;
-  silent?: boolean;
-}
+export const VersionInfoSchema = z.object({
+  branch: z.string(),
+  components: VersionComponentsSchema.nullable(),
+  describe: z.string(),
+  dirty: z.boolean(),
+  error: z.boolean().optional(),
+  humanReadable: z.string(),
+  timestamp: z.string(),
+  version: z.string(),
+});
 
-// New file-based versioning types
-export type VersionCalculationMode = 'add-to-patch' | 'append-commits';
+export const GenerateVersionOptionsSchema = z.object({
+  incrementPatch: z.boolean().optional(),
+  outputPath: z.string().optional(),
+  silent: z.boolean().optional(),
+});
 
-export interface VersionManagerConfig {
-  codeVersionBase: string;
-  runtimeVersion: string;
-  versionCalculationMode: VersionCalculationMode;
-}
+// New file-based versioning schemas
+export const VersionCalculationModeSchema = z.enum([
+  'add-to-patch',
+  'append-commits',
+]);
 
-export interface DynamicVersion {
-  buildNumber?: string;
-  codeVersion: string;
-  runtimeVersion: string;
-}
+export const VersionManagerConfigSchema = z.object({
+  codeVersionBase: z.string(),
+  runtimeVersion: z.string(),
+  versionCalculationMode: VersionCalculationModeSchema,
+});
+
+export const DynamicVersionSchema = z.object({
+  buildNumber: z.string().optional(),
+  codeVersion: z.string(),
+  runtimeVersion: z.string(),
+});
+
+// Infer TypeScript types from Zod schemas (single source of truth)
+export type VersionComponents = z.infer<typeof VersionComponentsSchema>;
+export type VersionInfo = z.infer<typeof VersionInfoSchema>;
+export type GenerateVersionOptions = z.infer<
+  typeof GenerateVersionOptionsSchema
+>;
+export type VersionCalculationMode = z.infer<
+  typeof VersionCalculationModeSchema
+>;
+export type VersionManagerConfig = z.infer<typeof VersionManagerConfigSchema>;
+export type DynamicVersion = z.infer<typeof DynamicVersionSchema>;

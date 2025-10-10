@@ -1,24 +1,29 @@
-import type {DynamicVersion} from '../../src/types';
+import type {DynamicVersion, VersionManagerConfig} from '../../src/types';
 
 import {execSync} from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import {
+  DynamicVersionSchema,
+  VersionManagerConfigSchema,
+} from '../../src/types';
+
 export interface CliResult {
-  stdout: string;
-  stderr: string;
   exitCode: number;
-  json?: any;
+  json?: unknown;
+  stderr: string;
+  stdout: string;
 }
 
 /**
  * Execute the version-manager CLI as a subprocess
  */
-export async function runCli(
+export function runCli(
   command: string,
   cwd: string,
   options?: {silent?: boolean},
-): Promise<CliResult> {
+): CliResult {
   const cliPath = path.join(__dirname, '..', '..', 'src', 'index.ts');
   const fullCommand = `bun ${cliPath} ${command}`.trim();
 
@@ -38,7 +43,7 @@ export async function runCli(
     });
 
     // Try to parse as JSON if it looks like JSON
-    let json;
+    let json: unknown;
     try {
       json = JSON.parse(stdout);
     } catch {
@@ -51,11 +56,18 @@ export async function runCli(
       stderr: '',
       stdout,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    // Type guard for execSync error with status, stderr, and stdout properties
+    const err = error as {
+      status?: number;
+      stderr?: Buffer | string;
+      stdout?: Buffer | string;
+    };
+
     return {
-      exitCode: error.status || 1,
-      stderr: error.stderr?.toString() || '',
-      stdout: error.stdout?.toString() || '',
+      exitCode: err.status ?? 1,
+      stderr: err.stderr?.toString() ?? '',
+      stdout: err.stdout?.toString() ?? '',
     };
   }
 }
@@ -72,7 +84,17 @@ export function parseVersionFile(repoPath: string): DynamicVersion | null {
 
   try {
     const content = fs.readFileSync(versionFilePath, 'utf-8');
-    return JSON.parse(content) as DynamicVersion;
+    const json: unknown = JSON.parse(content);
+
+    // Use Zod to validate the JSON
+    const result = DynamicVersionSchema.safeParse(json);
+
+    if (!result.success) {
+      console.warn('Invalid dynamic-version.local.json format:', result.error);
+      return null;
+    }
+
+    return result.data;
   } catch {
     return null;
   }
@@ -81,7 +103,7 @@ export function parseVersionFile(repoPath: string): DynamicVersion | null {
 /**
  * Parse the version-manager config file if it exists
  */
-export function parseConfigFile(repoPath: string) {
+export function parseConfigFile(repoPath: string): VersionManagerConfig | null {
   const configPath = path.join(repoPath, 'version-manager.json');
 
   if (!fs.existsSync(configPath)) {
@@ -90,7 +112,17 @@ export function parseConfigFile(repoPath: string) {
 
   try {
     const content = fs.readFileSync(configPath, 'utf-8');
-    return JSON.parse(content);
+    const json: unknown = JSON.parse(content);
+
+    // Use Zod to validate the JSON
+    const result = VersionManagerConfigSchema.safeParse(json);
+
+    if (!result.success) {
+      console.warn('Invalid version-manager.json format:', result.error);
+      return null;
+    }
+
+    return result.data;
   } catch {
     return null;
   }

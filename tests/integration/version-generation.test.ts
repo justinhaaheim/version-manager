@@ -31,15 +31,17 @@ describe('Version Generation', () => {
   });
 
   describe('Without config file', () => {
-    test('generates default version for repo without version-manager.json', async () => {
+    test('generates default version for repo without version-manager.json', () => {
       setupBasicRepo(repo);
 
-      const result = await repo.runCli('--silent');
+      const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
 
       expect(repo.fileExists('dynamic-version.local.json')).toBe(true);
 
-      const version = JSON.parse(repo.readFile('dynamic-version.local.json'));
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
       assertValidVersionJson(version);
       expect(version.codeVersion).toBe('0.1.0');
       expect(version.runtimeVersion).toBe('0.1.0');
@@ -47,19 +49,21 @@ describe('Version Generation', () => {
   });
 
   describe('With config file (add-to-patch mode)', () => {
-    test('returns base version when config just committed (0 commits since)', async () => {
+    test('returns base version when config just committed (0 commits since)', () => {
       setupRepoWithVersionConfig(repo, '0.1.0', '0.1.0', 'add-to-patch');
 
-      const result = await repo.runCli('--silent');
+      const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
 
-      const version = JSON.parse(repo.readFile('dynamic-version.local.json'));
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
       assertValidVersionJson(version);
       expect(version.codeVersion).toBe('0.1.0');
       expect(version.runtimeVersion).toBe('0.1.0');
     });
 
-    test('adds commits to patch version (5 commits after config)', async () => {
+    test('adds commits to patch version (5 commits after config)', () => {
       setupRepoWithCommitsAfterConfig(
         repo,
         5,
@@ -68,10 +72,12 @@ describe('Version Generation', () => {
         'add-to-patch',
       );
 
-      const result = await repo.runCli('--silent');
+      const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
 
-      const version = JSON.parse(repo.readFile('dynamic-version.local.json'));
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
       assertValidVersionJson(version);
 
       // With add-to-patch mode, 5 commits after base 0.1.0 → 0.1.5
@@ -79,7 +85,7 @@ describe('Version Generation', () => {
       expect(version.runtimeVersion).toBe('0.1.0');
     });
 
-    test('works with custom base version', async () => {
+    test('works with custom base version', () => {
       setupRepoWithCommitsAfterConfig(
         repo,
         5,
@@ -88,10 +94,12 @@ describe('Version Generation', () => {
         'add-to-patch',
       );
 
-      const result = await repo.runCli('--silent');
+      const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
 
-      const version = JSON.parse(repo.readFile('dynamic-version.local.json'));
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
       assertValidVersionJson(version);
 
       // 5 commits after 1.2.3 → 1.2.8
@@ -101,7 +109,7 @@ describe('Version Generation', () => {
   });
 
   describe('With config file (append-commits mode)', () => {
-    test('appends commit count to base version', async () => {
+    test('appends commit count to base version', () => {
       setupRepoWithCommitsAfterConfig(
         repo,
         5,
@@ -110,10 +118,12 @@ describe('Version Generation', () => {
         'append-commits',
       );
 
-      const result = await repo.runCli('--silent');
+      const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
 
-      const version = JSON.parse(repo.readFile('dynamic-version.local.json'));
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
       assertValidVersionJson(version);
 
       // With append-commits mode, 5 commits after 0.1.0 → 0.1.0+5
@@ -121,13 +131,15 @@ describe('Version Generation', () => {
       expect(version.runtimeVersion).toBe('0.1.0');
     });
 
-    test('returns base version when no commits after config', async () => {
+    test('returns base version when no commits after config', () => {
       setupRepoWithVersionConfig(repo, '0.1.0', '0.1.0', 'append-commits');
 
-      const result = await repo.runCli('--silent');
+      const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
 
-      const version = JSON.parse(repo.readFile('dynamic-version.local.json'));
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
       assertValidVersionJson(version);
       assertAppendCommitsFormat(version.codeVersion, '0.1.0', 0);
       expect(version.runtimeVersion).toBe('0.1.0');
@@ -135,7 +147,7 @@ describe('Version Generation', () => {
   });
 
   describe('Build number from environment', () => {
-    test('includes BUILD_NUMBER from env variable', async () => {
+    test('includes BUILD_NUMBER from env variable', () => {
       setupRepoWithVersionConfig(repo);
 
       // Set environment variable before running CLI
@@ -143,10 +155,12 @@ describe('Version Generation', () => {
       process.env.BUILD_NUMBER = '42';
 
       try {
-        const result = await repo.runCli('--silent');
+        const result = repo.runCli('--silent');
         expect(result.exitCode).toBe(0);
 
-        const version = JSON.parse(repo.readFile('dynamic-version.local.json'));
+        const version: unknown = JSON.parse(
+          repo.readFile('dynamic-version.local.json'),
+        );
         assertValidVersionJson(version);
         expect(version.buildNumber).toBe('42');
       } finally {
@@ -159,38 +173,40 @@ describe('Version Generation', () => {
       }
     });
 
-    test('omits buildNumber when env variable not set', async () => {
+    test('omits buildNumber when env variable not set', () => {
       setupRepoWithVersionConfig(repo);
 
       // Ensure BUILD_NUMBER is not set
       delete process.env.BUILD_NUMBER;
 
-      const result = await repo.runCli('--silent');
+      const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
 
-      const version = JSON.parse(repo.readFile('dynamic-version.local.json'));
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
       assertValidVersionJson(version);
       expect(version.buildNumber).toBeUndefined();
     });
   });
 
   describe('Output file options', () => {
-    test('respects --output flag for custom file path', async () => {
+    test('respects --output flag for custom file path', () => {
       setupRepoWithVersionConfig(repo);
 
-      const result = await repo.runCli('--output custom.json --silent');
+      const result = repo.runCli('--output custom.json --silent');
       expect(result.exitCode).toBe(0);
 
       expect(repo.fileExists('custom.json')).toBe(true);
       expect(repo.fileExists('dynamic-version.local.json')).toBe(false);
 
-      const version = JSON.parse(repo.readFile('custom.json'));
+      const version: unknown = JSON.parse(repo.readFile('custom.json'));
       assertValidVersionJson(version);
     });
   });
 
   describe('Runtime version handling', () => {
-    test('runtime version always matches config (does not increment)', async () => {
+    test('runtime version always matches config (does not increment)', () => {
       setupRepoWithCommitsAfterConfig(
         repo,
         5,
@@ -199,10 +215,13 @@ describe('Version Generation', () => {
         'add-to-patch',
       );
 
-      const result = await repo.runCli('--silent');
+      const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
 
-      const version = JSON.parse(repo.readFile('dynamic-version.local.json'));
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
+      assertValidVersionJson(version);
 
       // Code version changes with commits, but runtime stays at config value
       expect(version.codeVersion).toBe('0.1.5');
@@ -211,13 +230,16 @@ describe('Version Generation', () => {
   });
 
   describe('Semantic versioning format', () => {
-    test('generated versions are valid semver', async () => {
+    test('generated versions are valid semver', () => {
       setupRepoWithVersionConfig(repo);
 
-      const result = await repo.runCli('--silent');
+      const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
 
-      const version = JSON.parse(repo.readFile('dynamic-version.local.json'));
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
+      assertValidVersionJson(version);
 
       // Should be valid semver format
       assertSemver(version.codeVersion);

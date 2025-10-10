@@ -49,7 +49,8 @@
     "test:fixtures": "bun tests/scripts/create-fixtures.ts"
   },
   "dependencies": {
-    "yargs": "18.0.0"
+    "yargs": "18.0.0",
+    "zod": "4.1.12"
   },
   "devDependencies": {
     "@types/bun": "1.2.23",
