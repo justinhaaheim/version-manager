@@ -1,8 +1,128 @@
 # Testing Framework Implementation Plan
 
 **Date:** 2025-10-10
-**Status:** Planning
+**Status:** In Progress
 **Goal:** Create a lean, focused integration test suite for the version-manager CLI tool
+**Last Updated:** 2025-10-10 (evening session)
+
+---
+
+## 🎯 Current Status Summary
+
+### ✅ Completed (2025-10-10)
+
+**Phase 1: Foundation (ALL DONE)**
+
+- ✅ Created `tests/helpers/test-repo.ts` - Full TestRepo class with git operations
+- ✅ Created `tests/helpers/cli-runner.ts` - CLI execution and result parsing
+- ✅ Created `tests/helpers/assertions.ts` - Custom Zod-based assertions
+- ✅ Created `tests/helpers/repo-fixtures.ts` - Programmatic repo setup functions
+- ✅ Created `tests/scripts/create-fixtures.ts` - Fixture generation script (kept for reference)
+- ✅ Added Zod schemas to `src/types.ts` as single source of truth
+- ✅ Fixed all lint errors (62 → 0) with proper type safety
+
+**Phase 2: Tests (PARTIAL)**
+
+- ✅ `tests/smoke.test.ts` - 6 smoke tests, all passing
+- ✅ `tests/integration/version-generation.test.ts` - 11 tests, all passing
+  - No config file scenarios
+  - add-to-patch mode (5 commits: 0.1.0 → 0.1.5)
+  - append-commits mode (5 commits: 0.1.0 → 0.1.0+5)
+  - Build number from environment
+  - Custom output paths
+  - Runtime version handling
+  - Semver validation
+- ⏳ `tests/integration/git-hooks.test.ts` - TODO (Next priority)
+- ⏳ `tests/integration/cli-commands.test.ts` - TODO
+
+**Test Results:**
+
+```
+✅ 17 tests passing
+✅ 0 lint errors
+✅ Zod validation for type safety
+✅ Tests run in ~4 seconds
+```
+
+### 🚨 CRITICAL ARCHITECTURAL ISSUE DISCOVERED
+
+**Git Hooks Implementation Not Aligned with Requirements**
+
+Current implementation (`src/git-hooks-manager.ts`):
+
+- Defaults to `.git/hooks` directory
+- Has Husky detection as fallback
+- Modifies `.git/hooks` directly if Husky not detected
+
+**Required approach:**
+
+- ✅ MUST ALWAYS use Husky for git hooks
+- ✅ Install Husky if not already present
+- ✅ Create hooks in `.husky/` directory only
+- ❌ NEVER modify `.git/hooks` directly
+
+**Impact on Testing:**
+
+- Should we refactor `git-hooks-manager.ts` FIRST, then write tests?
+- OR write tests for current implementation, then refactor?
+
+**Recommendation:** Refactor first, then test the correct implementation.
+
+### 📋 Husky-First Refactor Plan
+
+**What needs to change in `src/git-hooks-manager.ts`:**
+
+1. **Check for Husky installation:**
+
+   ```typescript
+   function isHuskyInstalled(): boolean {
+     // Check node_modules/.bin/husky exists
+     // OR check package.json for husky dependency
+   }
+   ```
+
+2. **Install Husky if missing:**
+
+   ```typescript
+   function ensureHuskyInstalled(): void {
+     if (!isHuskyInstalled()) {
+       // Run: npm install --save-dev husky
+       // Run: npx husky init
+     }
+   }
+   ```
+
+3. **Always use `.husky/` directory:**
+
+   ```typescript
+   function getHuskyHooksPath(): string {
+     // Always return join(process.cwd(), '.husky')
+     // Remove git config core.hooksPath detection
+   }
+   ```
+
+4. **Create/update hooks in `.husky/` only:**
+   - Remove all `.git/hooks` logic
+   - Simplify to only handle `.husky/` files
+   - Keep the smart line replacement logic
+
+5. **Update hook template:**
+
+   ```bash
+   #!/usr/bin/env sh
+   . "$(dirname -- "$0")/_/husky.sh"
+
+   # Dynamic version generator
+   npx @justinhaaheim/version-manager --silent
+   ```
+
+**Benefits:**
+
+- ✅ Consistent approach across all projects
+- ✅ Hooks are committed to repo (better team collaboration)
+- ✅ Standard tool, well-maintained
+- ✅ Works with CI/CD systems
+- ✅ Simpler codebase (remove .git/hooks complexity)
 
 ---
 
@@ -536,27 +656,31 @@ Options:
 
 ## Implementation Checklist
 
-### Phase 1: Foundation
+### Phase 1: Foundation ✅ COMPLETE
 
-- [ ] Create `tests/helpers/test-repo.ts`
-- [ ] Create `tests/helpers/cli-runner.ts`
-- [ ] Create `tests/helpers/assertions.ts`
-- [ ] Create `tests/scripts/create-fixtures.ts`
-- [ ] Run fixture creation script to generate repos
-- [ ] Create config fixtures
+- [x] Create `tests/helpers/test-repo.ts`
+- [x] Create `tests/helpers/cli-runner.ts`
+- [x] Create `tests/helpers/assertions.ts`
+- [x] Create `tests/helpers/repo-fixtures.ts` (programmatic approach)
+- [x] Create `tests/scripts/create-fixtures.ts` (kept for reference)
+- [x] Create smoke tests
+- [x] Add Zod validation throughout
+- [x] Fix all lint errors
 
-### Phase 2: Tests
+### Phase 2: Tests (IN PROGRESS)
 
+- [x] Write `tests/smoke.test.ts` - 6 tests, all passing
 - [x] Write `tests/integration/version-generation.test.ts` - 11 tests, all passing
+- [ ] **NEXT: Refactor `src/git-hooks-manager.ts` to be Husky-first**
 - [ ] Write `tests/integration/git-hooks.test.ts` - TODO
 - [ ] Write `tests/integration/cli-commands.test.ts` - TODO
 
-### Phase 3: Integration
+### Phase 3: Integration ✅ MOSTLY COMPLETE
 
-- [ ] Add test scripts to package.json
-- [ ] Update tsconfig.json
-- [ ] Update .gitignore
-- [ ] Update signal script to include tests
+- [x] Add test scripts to package.json
+- [x] Update tsconfig.json
+- [x] Update .gitignore
+- [ ] Update signal script to include tests (if not already)
 - [ ] Document testing in README
 
 ### Phase 4: Documentation
