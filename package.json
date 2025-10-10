@@ -43,12 +43,16 @@
     "dynamic-version:generate": "npx @justinhaaheim/version-manager",
     "test:local": "bun src/index.ts",
     "test:local:help": "bun src/index.ts --help",
-    "test:local:install": "bun src/index.ts --install"
+    "test:local:install": "bun src/index.ts --install",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:fixtures": "bun tests/scripts/create-fixtures.ts"
   },
   "dependencies": {
     "yargs": "18.0.0"
   },
   "devDependencies": {
+    "@types/bun": "1.2.23",
     "@types/node": "^20.0.0",
     "@types/yargs": "17.0.33",
     "concurrently": "8.2.1",

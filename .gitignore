@@ -25,3 +25,7 @@ yarn-error.*
 # Temporary files
 tmp/
 *.local.json
+
+# Test fixtures (generated files)
+tests/fixtures/git-repos/*.tar.gz
+tests/tmp/
