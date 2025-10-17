@@ -204,14 +204,14 @@ export class TestRepo {
   }
 
   /**
-   * Get git hooks directory path
+   * Get git hooks directory path (.git/hooks)
    */
   getHooksDir(): string {
     return path.join(this.tempDir, '.git', 'hooks');
   }
 
   /**
-   * Check if a git hook exists and is executable
+   * Check if a git hook exists and is executable (.git/hooks)
    */
   hookExists(hookName: string): boolean {
     const hookPath = path.join(this.getHooksDir(), hookName);
@@ -224,10 +224,45 @@ export class TestRepo {
   }
 
   /**
-   * Read a git hook file
+   * Read a git hook file (.git/hooks)
    */
   readHook(hookName: string): string {
     const hookPath = path.join(this.getHooksDir(), hookName);
+    return fs.readFileSync(hookPath, 'utf-8');
+  }
+
+  /**
+   * Get Husky hooks directory path (.husky)
+   */
+  getHuskyHooksDir(): string {
+    return path.join(this.tempDir, '.husky');
+  }
+
+  /**
+   * Check if Husky is initialized (.husky directory exists)
+   */
+  isHuskyInitialized(): boolean {
+    return fs.existsSync(this.getHuskyHooksDir());
+  }
+
+  /**
+   * Check if a Husky hook exists and is executable
+   */
+  huskyHookExists(hookName: string): boolean {
+    const hookPath = path.join(this.getHuskyHooksDir(), hookName);
+    if (!fs.existsSync(hookPath)) {
+      return false;
+    }
+
+    const stats = fs.statSync(hookPath);
+    return Boolean(stats.mode & 0o111); // Check executable bit
+  }
+
+  /**
+   * Read a Husky hook file
+   */
+  readHuskyHook(hookName: string): string {
+    const hookPath = path.join(this.getHuskyHooksDir(), hookName);
     return fs.readFileSync(hookPath, 'utf-8');
   }
 

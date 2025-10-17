@@ -21,7 +21,7 @@
 - ✅ Added Zod schemas to `src/types.ts` as single source of truth
 - ✅ Fixed all lint errors (62 → 0) with proper type safety
 
-**Phase 2: Tests (PARTIAL)**
+**Phase 2: Tests (MOSTLY COMPLETE)**
 
 - ✅ `tests/smoke.test.ts` - 6 smoke tests, all passing
 - ✅ `tests/integration/version-generation.test.ts` - 11 tests, all passing
@@ -32,16 +32,25 @@
   - Custom output paths
   - Runtime version handling
   - Semver validation
-- ⏳ `tests/integration/git-hooks.test.ts` - TODO (Next priority)
-- ⏳ `tests/integration/cli-commands.test.ts` - TODO
+- ✅ `tests/integration/git-hooks.test.ts` - 18 tests, all passing (1 skipped)
+  - Husky installation (fresh install, already installed, package manager detection)
+  - Hook creation (all 4 hooks, correct directory, executable, correct format)
+  - Hook updates (append, replace, multiple matches warning)
+  - Script installation (adds scripts, preserves existing)
+  - CLI flags (--silent, --increment-patch, --no-fail)
+  - Error handling
+  - Hook execution test (skipped - requires complex npm link setup)
+- ⏳ `tests/integration/cli-commands.test.ts` - TODO (Lower priority)
 
 **Test Results:**
 
 ```
-✅ 17 tests passing
+✅ 35 tests passing
+✅ 1 test skipped (hook execution - requires npm link complexity)
 ✅ 0 lint errors
 ✅ Zod validation for type safety
-✅ Tests run in ~4 seconds
+✅ Tests run in ~19 seconds
+✅ npm link setup in pretest/posttest scripts
 ```
 
 ### 🚨 CRITICAL ARCHITECTURAL ISSUE DISCOVERED
@@ -667,13 +676,15 @@ Options:
 - [x] Add Zod validation throughout
 - [x] Fix all lint errors
 
-### Phase 2: Tests (IN PROGRESS)
+### Phase 2: Tests (MOSTLY COMPLETE)
 
 - [x] Write `tests/smoke.test.ts` - 6 tests, all passing
 - [x] Write `tests/integration/version-generation.test.ts` - 11 tests, all passing
-- [ ] **NEXT: Refactor `src/git-hooks-manager.ts` to be Husky-first**
-- [ ] Write `tests/integration/git-hooks.test.ts` - TODO
-- [ ] Write `tests/integration/cli-commands.test.ts` - TODO
+- [x] ~~Refactor `src/git-hooks-manager.ts` to be Husky-first~~ - Already completed in earlier session
+- [x] Write `tests/integration/git-hooks.test.ts` - 18 tests, all passing (1 skipped)
+- [x] Add npm link setup to pretest/posttest scripts
+- [x] Add Husky helper methods to TestRepo class
+- [ ] Write `tests/integration/cli-commands.test.ts` - Lower priority
 
 ### Phase 3: Integration ✅ MOSTLY COMPLETE
 
