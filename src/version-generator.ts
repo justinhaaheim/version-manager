@@ -295,3 +295,139 @@ export async function generateFileBasedVersion(): Promise<DynamicVersion> {
 
   return result;
 }
+
+/**
+ * Bump version type
+ */
+export type BumpType = 'major' | 'minor' | 'patch';
+
+/**
+ * Result of bumping version
+ */
+export interface BumpVersionResult {
+  newVersion: string;
+  oldVersion: string;
+  updatedRuntimeVersion: boolean;
+}
+
+/**
+ * Parse a semver version string into components
+ * @param version - Semver version string (e.g., "1.2.3" or "1.2.3+5")
+ * @returns [major, minor, patch] or null if invalid
+ */
+function parseSemver(version: string): [number, number, number] | null {
+  // Strip any metadata (e.g., "+5" from "1.2.3+5")
+  const cleanVersion = version.split('+')[0];
+  const parts = cleanVersion.split('.');
+
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const [major, minor, patch] = parts.map(Number);
+  if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
+    return null;
+  }
+
+  return [major, minor, patch];
+}
+
+/**
+ * Increment a semver version based on bump type
+ * @param version - Current version string
+ * @param bumpType - Type of bump (major, minor, patch)
+ * @returns New version string or null if invalid
+ */
+function incrementVersion(version: string, bumpType: BumpType): string | null {
+  const parts = parseSemver(version);
+  if (!parts) {
+    return null;
+  }
+
+  let [major, minor, patch] = parts;
+
+  switch (bumpType) {
+    case 'major':
+      major += 1;
+      minor = 0;
+      patch = 0;
+      break;
+    case 'minor':
+      minor += 1;
+      patch = 0;
+      break;
+    case 'patch':
+      patch += 1;
+      break;
+  }
+
+  return `${major}.${minor}.${patch}`;
+}
+
+/**
+ * Bump the version in version-manager.json
+ * @param bumpType - Type of bump (major, minor, patch)
+ * @param updateRuntime - Whether to also update runtimeVersion to match
+ * @param silent - Suppress console output
+ * @returns Result with old/new versions
+ */
+export async function bumpVersion(
+  bumpType: BumpType,
+  updateRuntime = false,
+  silent = false,
+): Promise<BumpVersionResult> {
+  const configPath = join(process.cwd(), 'version-manager.json');
+
+  // Check if in git repository
+  const isRepo = await isGitRepository();
+  if (!isRepo) {
+    throw new Error(
+      'Not a git repository. Please run this command in a git project.',
+    );
+  }
+
+  // Read current config
+  const config = readVersionManagerConfig(configPath);
+  if (!config) {
+    throw new Error(
+      'version-manager.json not found. Run the install command first or create the file manually.',
+    );
+  }
+
+  // Generate current computed version to show user what it was
+  const currentDynamic = await generateFileBasedVersion();
+  const oldVersion = currentDynamic.codeVersion;
+
+  // Increment from the current computed version (not the base)
+  const newVersion = incrementVersion(oldVersion, bumpType);
+  if (!newVersion) {
+    throw new Error(
+      `Invalid version format: ${oldVersion}. Expected semver format (e.g., 1.2.3)`,
+    );
+  }
+
+  // Update config
+  config.codeVersionBase = newVersion;
+  if (updateRuntime) {
+    config.runtimeVersion = newVersion;
+  }
+
+  // Write updated config
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+
+  if (!silent) {
+    console.log('📈 Bumping version...');
+    console.log(`   Current: ${oldVersion}`);
+    console.log(`   New base: ${newVersion}`);
+    if (updateRuntime) {
+      console.log(`   Runtime version: ${newVersion}`);
+    }
+    console.log('✅ Updated version-manager.json');
+  }
+
+  return {
+    newVersion,
+    oldVersion,
+    updatedRuntimeVersion: updateRuntime,
+  };
+}
