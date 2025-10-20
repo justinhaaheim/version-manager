@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.detectPackageManager = detectPackageManager;
 exports.checkGitignore = checkGitignore;
 exports.installGitHooks = installGitHooks;
 const child_process_1 = require("child_process");
@@ -11,6 +12,24 @@ const HOOK_NAMES = [
     'post-merge',
     'post-rewrite',
 ];
+/**
+ * Detect which package manager to use based on lock files
+ * @returns 'bun' if bun.lock exists, 'npm' if package-lock.json exists,
+ *          or 'npm' with warning if neither exists
+ */
+function detectPackageManager() {
+    const hasBunLock = (0, fs_1.existsSync)((0, path_1.join)(process.cwd(), 'bun.lock'));
+    const hasNpmLock = (0, fs_1.existsSync)((0, path_1.join)(process.cwd(), 'package-lock.json'));
+    if (hasBunLock) {
+        return 'bun';
+    }
+    if (hasNpmLock) {
+        return 'npm';
+    }
+    // Neither lock file exists - warn and default to npm
+    console.warn('⚠️  No bun.lock or package-lock.json found. Defaulting to npm.');
+    return 'npm';
+}
 function checkGitignore() {
     const gitignorePath = (0, path_1.join)(process.cwd(), '.gitignore');
     if (!(0, fs_1.existsSync)(gitignorePath)) {
@@ -19,33 +38,140 @@ function checkGitignore() {
     const content = (0, fs_1.readFileSync)(gitignorePath, 'utf-8');
     return content.includes('*.local.json') || content.includes('.local.json');
 }
-function getGitHooksPath() {
-    // Check if a custom hooks path is configured
+/**
+ * Check if Husky is installed in the project
+ */
+function isHuskyInstalled() {
+    const packageJsonPath = (0, path_1.join)(process.cwd(), 'package.json');
+    if (!(0, fs_1.existsSync)(packageJsonPath)) {
+        return false;
+    }
     try {
-        const customPath = (0, child_process_1.execSync)('git config core.hooksPath', {
-            encoding: 'utf-8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-        }).trim();
-        if (customPath) {
-            // If it's a relative path, resolve it relative to the git root
-            if (!customPath.startsWith('/')) {
-                return (0, path_1.join)(process.cwd(), customPath);
-            }
-            return customPath;
-        }
+        const packageJson = JSON.parse((0, fs_1.readFileSync)(packageJsonPath, 'utf-8'));
+        // Check if husky is in dependencies or devDependencies
+        return !!(packageJson.devDependencies?.husky ?? packageJson.dependencies?.husky);
     }
     catch {
-        // No custom hooks path configured, use default
+        return false;
     }
-    // Default to .git/hooks
-    return (0, path_1.join)(process.cwd(), '.git', 'hooks');
 }
-function installGitHooks(incrementPatch = false, silent = false, noFail = false) {
-    const gitHooksDir = getGitHooksPath();
-    if (!(0, fs_1.existsSync)(gitHooksDir)) {
-        throw new Error(`Git hooks directory not found: ${gitHooksDir}`);
+/**
+ * Install Husky and initialize it in the project
+ */
+function ensureHuskyInstalled(silent = false) {
+    if (isHuskyInstalled()) {
+        if (!silent) {
+            console.log('   ℹ️  Husky already installed');
+        }
+        return;
     }
-    console.log(`📦 Installing git hooks to: ${gitHooksDir}`);
+    const packageManager = detectPackageManager();
+    if (!silent) {
+        console.log(`   📦 Installing Husky using ${packageManager}...`);
+    }
+    try {
+        // Install husky as dev dependency using detected package manager
+        const installCmd = packageManager === 'bun'
+            ? 'bun add --dev husky'
+            : 'npm install --save-dev husky';
+        (0, child_process_1.execSync)(installCmd, {
+            cwd: process.cwd(),
+            stdio: silent ? 'pipe' : 'inherit',
+        });
+        if (!silent) {
+            console.log('   ✅ Husky installed');
+            console.log('   🔧 Initializing Husky...');
+        }
+        // Run husky init to set up .husky directory and prepare script
+        // Use npx for both package managers (bunx doesn't support husky init well)
+        (0, child_process_1.execSync)('npx husky init', {
+            cwd: process.cwd(),
+            stdio: silent ? 'pipe' : 'inherit',
+        });
+        if (!silent) {
+            console.log('   ✅ Husky initialized');
+        }
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to install Husky: ${errorMessage}`);
+    }
+}
+/**
+ * Get the path to the Husky hooks directory
+ * Always returns .husky/ - we no longer support .git/hooks
+ */
+function getHuskyHooksPath() {
+    return (0, path_1.join)(process.cwd(), '.husky');
+}
+/**
+ * Update an existing Husky hook file
+ */
+function updateExistingHook(hookPath, command, hookName, silent) {
+    const existingContent = (0, fs_1.readFileSync)(hookPath, 'utf-8');
+    const lines = existingContent.split('\n');
+    // Find lines containing our command patterns
+    const matchingLineIndices = [];
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes('bun run test:local') ||
+            lines[i].includes('npx @justinhaaheim/version-manager')) {
+            matchingLineIndices.push(i);
+        }
+    }
+    if (matchingLineIndices.length === 0) {
+        // No matches - append to end
+        const updatedContent = existingContent.trim() +
+            '\n\n# Dynamic version generator\n' +
+            `${command}\n`;
+        (0, fs_1.writeFileSync)(hookPath, updatedContent);
+        (0, fs_1.chmodSync)(hookPath, '755');
+        if (!silent) {
+            console.log(`   ✓ Appended to existing ${hookName} hook`);
+        }
+    }
+    else if (matchingLineIndices.length === 1) {
+        // Exactly one match - replace that line
+        lines[matchingLineIndices[0]] = command;
+        (0, fs_1.writeFileSync)(hookPath, lines.join('\n'));
+        (0, fs_1.chmodSync)(hookPath, '755');
+        if (!silent) {
+            console.log(`   ✓ Updated ${hookName} hook`);
+        }
+    }
+    else {
+        // Multiple matches - warn user
+        if (!silent) {
+            console.log(`   ⚠️  ${hookName}: Found ${matchingLineIndices.length} version-manager commands. Please manually edit ${hookPath}`);
+        }
+    }
+}
+/**
+ * Create a new Husky hook file
+ */
+function createNewHook(hookPath, command, hookName, silent) {
+    // Husky hook template (modern format - no longer needs husky.sh sourcing)
+    const hookContent = `# Dynamic version generator
+${command}
+`;
+    (0, fs_1.writeFileSync)(hookPath, hookContent);
+    (0, fs_1.chmodSync)(hookPath, '755');
+    if (!silent) {
+        console.log(`   ✓ Created ${hookName} hook`);
+    }
+}
+/**
+ * Install git hooks using Husky
+ */
+function installGitHooks(incrementPatch = false, silent = false, noFail = false) {
+    // Ensure Husky is installed
+    ensureHuskyInstalled(silent);
+    const huskyDir = getHuskyHooksPath();
+    if (!(0, fs_1.existsSync)(huskyDir)) {
+        throw new Error(`Husky directory not found: ${huskyDir}. This should have been created by husky init.`);
+    }
+    if (!silent) {
+        console.log(`📦 Installing git hooks to: ${huskyDir}`);
+    }
     // Detect if we're running from the version-manager development directory itself
     const currentPackageJsonPath = (0, path_1.join)(process.cwd(), 'package.json');
     let runCommand = 'npx @justinhaaheim/version-manager';
@@ -55,7 +181,9 @@ function installGitHooks(incrementPatch = false, silent = false, noFail = false)
             if (packageJson.name === '@justinhaaheim/version-manager') {
                 // We're in the development directory, use local script
                 runCommand = 'bun run test:local';
-                console.log('   ℹ️  Detected local development environment, using: bun run test:local');
+                if (!silent) {
+                    console.log('   ℹ️  Detected local development environment, using: bun run test:local');
+                }
             }
         }
         catch {
@@ -66,152 +194,15 @@ function installGitHooks(incrementPatch = false, silent = false, noFail = false)
     const silentFlag = silent ? ' --silent' : '';
     const noFailFlag = noFail ? ' --no-fail' : '';
     const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}`;
-    // Check if we're using Husky
-    const isHusky = gitHooksDir.includes('.husky');
     for (const hookName of HOOK_NAMES) {
-        const hookPath = (0, path_1.join)(gitHooksDir, hookName);
-        let hookContent;
-        if (isHusky) {
-            // For Husky, we need to check if it's the special _ directory
-            if (gitHooksDir.endsWith('/_')) {
-                // Skip the Husky internal directory - we should install in parent
-                console.log(`   ⚠️  Detected Husky internal directory, installing to parent directory`);
-                const parentDir = (0, path_1.join)(gitHooksDir, '..');
-                const parentHookPath = (0, path_1.join)(parentDir, hookName);
-                if ((0, fs_1.existsSync)(parentHookPath)) {
-                    const existingContent = (0, fs_1.readFileSync)(parentHookPath, 'utf-8');
-                    const lines = existingContent.split('\n');
-                    // Find lines containing our command patterns
-                    const matchingLineIndices = [];
-                    for (let i = 0; i < lines.length; i++) {
-                        if (lines[i].includes('bun run test:local') ||
-                            lines[i].includes('npx @justinhaaheim/version-manager')) {
-                            matchingLineIndices.push(i);
-                        }
-                    }
-                    if (matchingLineIndices.length === 0) {
-                        // No matches - append to end
-                        const updatedContent = existingContent.trim() +
-                            '\n\n# Dynamic version generator\n' +
-                            `${finalCommand}\n`;
-                        (0, fs_1.writeFileSync)(parentHookPath, updatedContent);
-                        (0, fs_1.chmodSync)(parentHookPath, '755');
-                        console.log(`   ✓ Appended to existing ${hookName} hook`);
-                    }
-                    else if (matchingLineIndices.length === 1) {
-                        // Exactly one match - replace that line
-                        lines[matchingLineIndices[0]] = finalCommand;
-                        (0, fs_1.writeFileSync)(parentHookPath, lines.join('\n'));
-                        (0, fs_1.chmodSync)(parentHookPath, '755');
-                        console.log(`   ✓ Updated ${hookName} hook`);
-                    }
-                    else {
-                        // Multiple matches - warn user
-                        console.log(`   ⚠️  ${hookName}: Found ${matchingLineIndices.length} version-manager commands. Please manually edit ${parentHookPath}`);
-                    }
-                }
-                else {
-                    // New hook - create it
-                    hookContent = `# Dynamic version generator
-${finalCommand}
-`;
-                    (0, fs_1.writeFileSync)(parentHookPath, hookContent);
-                    (0, fs_1.chmodSync)(parentHookPath, '755');
-                    console.log(`   ✓ Created ${hookName} hook in Husky directory`);
-                }
-            }
-            else {
-                // Regular Husky directory
-                if ((0, fs_1.existsSync)(hookPath)) {
-                    const existingContent = (0, fs_1.readFileSync)(hookPath, 'utf-8');
-                    const lines = existingContent.split('\n');
-                    // Find lines containing our command patterns
-                    const matchingLineIndices = [];
-                    for (let i = 0; i < lines.length; i++) {
-                        if (lines[i].includes('bun run test:local') ||
-                            lines[i].includes('npx @justinhaaheim/version-manager')) {
-                            matchingLineIndices.push(i);
-                        }
-                    }
-                    if (matchingLineIndices.length === 0) {
-                        // No matches - append to end
-                        const updatedContent = existingContent.trim() +
-                            '\n\n# Dynamic version generator\n' +
-                            `${finalCommand}\n`;
-                        (0, fs_1.writeFileSync)(hookPath, updatedContent);
-                        (0, fs_1.chmodSync)(hookPath, '755');
-                        console.log(`   ✓ Appended to existing ${hookName} hook`);
-                    }
-                    else if (matchingLineIndices.length === 1) {
-                        // Exactly one match - replace that line
-                        lines[matchingLineIndices[0]] = finalCommand;
-                        (0, fs_1.writeFileSync)(hookPath, lines.join('\n'));
-                        (0, fs_1.chmodSync)(hookPath, '755');
-                        console.log(`   ✓ Updated ${hookName} hook`);
-                    }
-                    else {
-                        // Multiple matches - warn user
-                        console.log(`   ⚠️  ${hookName}: Found ${matchingLineIndices.length} version-manager commands. Please manually edit ${hookPath}`);
-                    }
-                }
-                else {
-                    // New hook - create it
-                    hookContent = `# Dynamic version generator
-${finalCommand}
-`;
-                    (0, fs_1.writeFileSync)(hookPath, hookContent);
-                    (0, fs_1.chmodSync)(hookPath, '755');
-                    console.log(`   ✓ Created ${hookName} hook`);
-                }
-            }
+        const hookPath = (0, path_1.join)(huskyDir, hookName);
+        if ((0, fs_1.existsSync)(hookPath)) {
+            // Hook exists - update it
+            updateExistingHook(hookPath, finalCommand, hookName, silent);
         }
         else {
-            // Regular git hooks
-            if ((0, fs_1.existsSync)(hookPath)) {
-                const existingContent = (0, fs_1.readFileSync)(hookPath, 'utf-8');
-                const lines = existingContent.split('\n');
-                // Find lines containing our command patterns
-                const matchingLineIndices = [];
-                for (let i = 0; i < lines.length; i++) {
-                    if (lines[i].includes('bun run test:local') ||
-                        lines[i].includes('npx @justinhaaheim/version-manager')) {
-                        matchingLineIndices.push(i);
-                    }
-                }
-                if (matchingLineIndices.length === 0) {
-                    // No matches - append to end
-                    const updatedContent = existingContent +
-                        '\n' +
-                        `# Dynamic version generator\n` +
-                        `${finalCommand}\n`;
-                    (0, fs_1.writeFileSync)(hookPath, updatedContent);
-                    (0, fs_1.chmodSync)(hookPath, '755');
-                    console.log(`   ✓ Appended to existing ${hookName} hook`);
-                }
-                else if (matchingLineIndices.length === 1) {
-                    // Exactly one match - replace that line
-                    lines[matchingLineIndices[0]] = finalCommand;
-                    (0, fs_1.writeFileSync)(hookPath, lines.join('\n'));
-                    (0, fs_1.chmodSync)(hookPath, '755');
-                    console.log(`   ✓ Updated ${hookName} hook`);
-                }
-                else {
-                    // Multiple matches - warn user
-                    console.log(`   ⚠️  ${hookName}: Found ${matchingLineIndices.length} version-manager commands. Please manually edit ${hookPath}`);
-                }
-            }
-            else {
-                // New hook - create it
-                hookContent = `#!/bin/sh
-# Auto-generated hook by @justinhaaheim/version-manager
-# This hook updates the dynamic-version.local.json file
-
-${finalCommand}
-`;
-                (0, fs_1.writeFileSync)(hookPath, hookContent);
-                (0, fs_1.chmodSync)(hookPath, '755');
-                console.log(`   ✓ Created ${hookName} hook`);
-            }
+            // Create new hook
+            createNewHook(hookPath, finalCommand, hookName, silent);
         }
     }
 }

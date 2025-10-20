@@ -3,6 +3,9 @@ node_modules/
 
 # Build output
 # dist/ - Committed for GitHub installation
+# Ignore nested build artifacts (if accidentally generated)
+dist/src/
+dist/tests/
 
 # Debug
 npm-debug.*

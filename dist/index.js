@@ -149,13 +149,17 @@ async function installCommand(incrementPatch, outputPath, silent, noFail) {
                 console.log('   ℹ️  Existing dynamic-version scripts detected. Preserving customizations.');
             }
             else {
-                const result = (0, script_manager_1.addScriptsToPackageJson)(false);
+                const result = (0, script_manager_1.addScriptsToPackageJson)(false, true);
                 if (result.success) {
                     console.log(`   ✅ ${result.message}`);
                     console.log('\n   Added scripts:');
                     console.log('   - npm run dynamic-version           # Reinstall/update');
                     console.log('   - npm run dynamic-version:generate   # Generate version file');
                     console.log('   - npm run dynamic-version:install-scripts  # Update scripts');
+                    console.log('\n   Added lifecycle scripts (auto-regenerate version):');
+                    console.log('   - prebuild   # Runs before npm run build');
+                    console.log('   - predev     # Runs before npm run dev');
+                    console.log('   - prestart   # Runs before npm run start');
                 }
                 else {
                     console.log(`   ⚠️  ${result.message}`);
@@ -213,6 +217,49 @@ async function installScriptsCommand() {
         }
     }
 }
+// Bump version command handler
+async function bumpCommand(bumpType, updateRuntime, silent, commit, message) {
+    // Bump the version
+    const result = await (0, version_generator_1.bumpVersion)(bumpType, updateRuntime, silent);
+    // Regenerate dynamic version file
+    if (!silent) {
+        console.log('📝 Regenerating dynamic-version.local.json...');
+    }
+    await generateVersionFile('./dynamic-version.local.json', silent);
+    // Optionally commit
+    if (commit) {
+        if (!silent) {
+            console.log('\n📦 Committing changes...');
+        }
+        const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
+        const commitMessage = message ??
+            `Bump version to ${result.newVersion}
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>`;
+        try {
+            execSync('git add version-manager.json', { stdio: 'pipe' });
+            execSync(`git commit -m '${commitMessage.replace(/'/g, "'\\''")}'`, {
+                stdio: 'pipe',
+            });
+            if (!silent) {
+                console.log('✅ Changes committed');
+            }
+        }
+        catch (error) {
+            if (!silent) {
+                console.error('❌ Failed to commit:', error);
+            }
+            throw error;
+        }
+    }
+    else if (!silent) {
+        console.log('\n💡 Tip: Commit this change with: git add version-manager.json && git commit -m "Bump version to ' +
+            result.newVersion +
+            '"');
+    }
+}
 async function main() {
     try {
         await (0, yargs_1.default)((0, helpers_1.hideBin)(process.argv))
@@ -234,6 +281,56 @@ async function main() {
             .command('install-scripts', 'Add/update dynamic-version scripts in package.json', (yargsInstance) => yargsInstance.options(globalOptions), async () => {
             await installScriptsCommand();
         })
+            .command('bump', 'Bump version to next major, minor, or patch', (yargsInstance) => yargsInstance.options({
+            ...globalOptions,
+            commit: {
+                alias: 'c',
+                default: false,
+                describe: 'Commit the version change automatically',
+                type: 'boolean',
+            },
+            major: {
+                default: false,
+                describe: 'Bump major version (e.g., 1.2.3 -> 2.0.0)',
+                type: 'boolean',
+            },
+            message: {
+                alias: 'm',
+                describe: 'Custom commit message (only with --commit)',
+                type: 'string',
+            },
+            minor: {
+                default: false,
+                describe: 'Bump minor version (e.g., 1.2.3 -> 1.3.0)',
+                type: 'boolean',
+            },
+            patch: {
+                default: false,
+                describe: 'Bump patch version (e.g., 1.2.3 -> 1.2.4)',
+                type: 'boolean',
+            },
+            runtime: {
+                alias: 'r',
+                default: false,
+                describe: 'Also update runtimeVersion to match',
+                type: 'boolean',
+            },
+        }), async (args) => {
+            // Validate that only one bump type is specified
+            const bumpTypes = [args.major, args.minor, args.patch].filter(Boolean);
+            if (bumpTypes.length > 1) {
+                throw new Error('Only one of --major, --minor, or --patch can be specified');
+            }
+            // Determine bump type - default to patch if none specified
+            let bumpType = 'patch';
+            if (args.major) {
+                bumpType = 'major';
+            }
+            else if (args.minor) {
+                bumpType = 'minor';
+            }
+            await bumpCommand(bumpType, args.runtime, args.silent, args.commit, args.message);
+        })
             .help()
             .alias('help', 'h')
             .version()
@@ -243,6 +340,11 @@ async function main() {
             .example('$0 install --increment-patch', 'Install with patch increment')
             .example('$0 install --silent --no-fail', 'Install with quiet hooks')
             .example('$0 install-scripts', 'Add/update scripts only')
+            .example('$0 bump', 'Bump patch version (default)')
+            .example('$0 bump --minor', 'Bump minor version')
+            .example('$0 bump --major', 'Bump major version')
+            .example('$0 bump --commit', 'Bump and commit automatically')
+            .example('$0 bump --runtime', 'Bump and update runtime version')
             .strict()
             .parseAsync();
         process.exit(0);

@@ -3,9 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateVersion = generateVersion;
 exports.createDefaultVersionManagerConfig = createDefaultVersionManagerConfig;
 exports.generateFileBasedVersion = generateFileBasedVersion;
+exports.bumpVersion = bumpVersion;
 const fs_1 = require("fs");
 const path_1 = require("path");
 const git_utils_1 = require("./git-utils");
+const types_1 = require("./types");
 function parseGitDescribe(describe) {
     const cleanDescribe = describe.replace('-dirty', '');
     const match = /^v?(\d+\.\d+\.\d+)-(\d+)-g([a-f0-9]+)$/.exec(cleanDescribe);
@@ -93,9 +95,9 @@ async function generateVersion(options = {}) {
     };
 }
 /**
- * Read version-manager.json configuration
+ * Read version-manager.json configuration with Zod validation
  * @param configPath - Path to version-manager.json
- * @returns Configuration object or null if not found
+ * @returns Configuration object or null if not found/invalid
  */
 function readVersionManagerConfig(configPath) {
     try {
@@ -103,16 +105,17 @@ function readVersionManagerConfig(configPath) {
             return null;
         }
         const content = (0, fs_1.readFileSync)(configPath, 'utf-8');
-        const config = JSON.parse(content);
-        // Validate required fields
-        if (!config.codeVersionBase ||
-            !config.runtimeVersion ||
-            !config.versionCalculationMode) {
+        const json = JSON.parse(content);
+        // Use Zod to validate the config
+        const result = types_1.VersionManagerConfigSchema.safeParse(json);
+        if (!result.success) {
+            console.warn(`⚠️  Invalid version-manager.json format:`, result.error.format());
             return null;
         }
-        return config;
+        return result.data;
     }
-    catch {
+    catch (error) {
+        console.warn(`⚠️  Failed to read version-manager.json:`, error);
         return null;
     }
 }
@@ -211,5 +214,100 @@ async function generateFileBasedVersion() {
         result.buildNumber = process.env.BUILD_NUMBER;
     }
     return result;
+}
+/**
+ * Parse a semver version string into components
+ * @param version - Semver version string (e.g., "1.2.3" or "1.2.3+5")
+ * @returns [major, minor, patch] or null if invalid
+ */
+function parseSemver(version) {
+    // Strip any metadata (e.g., "+5" from "1.2.3+5")
+    const cleanVersion = version.split('+')[0];
+    const parts = cleanVersion.split('.');
+    if (parts.length !== 3) {
+        return null;
+    }
+    const [major, minor, patch] = parts.map(Number);
+    if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
+        return null;
+    }
+    return [major, minor, patch];
+}
+/**
+ * Increment a semver version based on bump type
+ * @param version - Current version string
+ * @param bumpType - Type of bump (major, minor, patch)
+ * @returns New version string or null if invalid
+ */
+function incrementVersion(version, bumpType) {
+    const parts = parseSemver(version);
+    if (!parts) {
+        return null;
+    }
+    let [major, minor, patch] = parts;
+    switch (bumpType) {
+        case 'major':
+            major += 1;
+            minor = 0;
+            patch = 0;
+            break;
+        case 'minor':
+            minor += 1;
+            patch = 0;
+            break;
+        case 'patch':
+            patch += 1;
+            break;
+    }
+    return `${major}.${minor}.${patch}`;
+}
+/**
+ * Bump the version in version-manager.json
+ * @param bumpType - Type of bump (major, minor, patch)
+ * @param updateRuntime - Whether to also update runtimeVersion to match
+ * @param silent - Suppress console output
+ * @returns Result with old/new versions
+ */
+async function bumpVersion(bumpType, updateRuntime = false, silent = false) {
+    const configPath = (0, path_1.join)(process.cwd(), 'version-manager.json');
+    // Check if in git repository
+    const isRepo = await (0, git_utils_1.isGitRepository)();
+    if (!isRepo) {
+        throw new Error('Not a git repository. Please run this command in a git project.');
+    }
+    // Read current config
+    const config = readVersionManagerConfig(configPath);
+    if (!config) {
+        throw new Error('version-manager.json not found. Run the install command first or create the file manually.');
+    }
+    // Generate current computed version to show user what it was
+    const currentDynamic = await generateFileBasedVersion();
+    const oldVersion = currentDynamic.codeVersion;
+    // Increment from the current computed version (not the base)
+    const newVersion = incrementVersion(oldVersion, bumpType);
+    if (!newVersion) {
+        throw new Error(`Invalid version format: ${oldVersion}. Expected semver format (e.g., 1.2.3)`);
+    }
+    // Update config
+    config.codeVersionBase = newVersion;
+    if (updateRuntime) {
+        config.runtimeVersion = newVersion;
+    }
+    // Write updated config
+    (0, fs_1.writeFileSync)(configPath, JSON.stringify(config, null, 2) + '\n');
+    if (!silent) {
+        console.log('📈 Bumping version...');
+        console.log(`   Current: ${oldVersion}`);
+        console.log(`   New base: ${newVersion}`);
+        if (updateRuntime) {
+            console.log(`   Runtime version: ${newVersion}`);
+        }
+        console.log('✅ Updated version-manager.json');
+    }
+    return {
+        newVersion,
+        oldVersion,
+        updatedRuntimeVersion: updateRuntime,
+    };
 }
 //# sourceMappingURL=version-generator.js.map

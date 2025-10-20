@@ -10,17 +10,17 @@ const fs_1 = require("fs");
 const path_1 = require("path");
 const DEFAULT_SCRIPTS = [
     {
-        command: 'npx @justinhaaheim/version-manager --install',
+        command: 'npx @justinhaaheim/version-manager install',
         description: 'Install git hooks and generate version file',
         name: 'dynamic-version',
     },
     {
-        command: 'npx @justinhaaheim/version-manager --install',
+        command: 'npx @justinhaaheim/version-manager install',
         description: 'Install git hooks and generate version file',
         name: 'dynamic-version:install',
     },
     {
-        command: 'npx @justinhaaheim/version-manager --install-scripts',
+        command: 'npx @justinhaaheim/version-manager install-scripts',
         description: 'Add/update dynamic-version scripts in package.json',
         name: 'dynamic-version:install-scripts',
     },
@@ -28,6 +28,24 @@ const DEFAULT_SCRIPTS = [
         command: 'npx @justinhaaheim/version-manager',
         description: 'Generate an up-to-date version file',
         name: 'dynamic-version:generate',
+    },
+];
+// Lifecycle scripts that regenerate version before dev/build/start
+const LIFECYCLE_SCRIPTS = [
+    {
+        command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+        description: 'Regenerate version before build',
+        name: 'prebuild',
+    },
+    {
+        command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+        description: 'Regenerate version before dev server',
+        name: 'predev',
+    },
+    {
+        command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+        description: 'Regenerate version before start',
+        name: 'prestart',
     },
 ];
 function hasExistingDynamicVersionScripts(packageJson) {
@@ -68,7 +86,7 @@ function writePackageJson(packageJson) {
         return false;
     }
 }
-function addScriptsToPackageJson(force = false) {
+function addScriptsToPackageJson(force = false, includeLifecycleScripts = true) {
     const packageJson = readPackageJson();
     if (!packageJson) {
         return {
@@ -91,8 +109,12 @@ function addScriptsToPackageJson(force = false) {
         };
     }
     const conflictsOverwritten = [];
+    // Combine default scripts with lifecycle scripts if requested
+    const scriptsToAdd = includeLifecycleScripts
+        ? [...DEFAULT_SCRIPTS, ...LIFECYCLE_SCRIPTS]
+        : DEFAULT_SCRIPTS;
     // Add or update scripts
-    for (const script of DEFAULT_SCRIPTS) {
+    for (const script of scriptsToAdd) {
         if (packageJson.scripts[script.name] &&
             packageJson.scripts[script.name] !== script.command) {
             conflictsOverwritten.push(script.name);
@@ -116,11 +138,18 @@ function addScriptsToPackageJson(force = false) {
         success: true,
     };
 }
-function listDefaultScripts() {
+function listDefaultScripts(includeLifecycleScripts = true) {
     console.log('\nDefault dynamic-version scripts:');
     for (const script of DEFAULT_SCRIPTS) {
         console.log(`  ${script.name}: ${script.command}`);
         console.log(`    # ${script.description}`);
+    }
+    if (includeLifecycleScripts) {
+        console.log('\nLifecycle scripts (auto-regenerate version):');
+        for (const script of LIFECYCLE_SCRIPTS) {
+            console.log(`  ${script.name}: ${script.command}`);
+            console.log(`    # ${script.description}`);
+        }
     }
 }
 //# sourceMappingURL=script-manager.js.map
