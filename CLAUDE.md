@@ -36,7 +36,7 @@
 
 ## CLI Commands
 
-The tool provides three main commands:
+The tool provides four main commands:
 
 ### 1. Generate Version File (default)
 ```bash
@@ -52,22 +52,54 @@ bun run test:local  # For local development
 - `--silent, -s`: Suppress console output
 - `--fail/--no-fail`: Exit with error code on failures (default: true)
 
-### 2. Install Git Hooks
+### 2. Install Git Hooks and Scripts
 ```bash
 npx @justinhaaheim/version-manager install [options]
 bun run test:local:install  # For local development
 ```
 - Installs git hooks (post-commit, post-checkout, post-merge, post-rewrite)
-- Adds scripts to package.json
+- Adds scripts to package.json (including prebuild, predev, prestart hooks)
 - Generates initial version file
 - Works with standard .git/hooks and Husky
+
+**Scripts added:**
+- `dynamic-version:generate` - Generate version file
+- `dynamic-version:install` - Reinstall git hooks and scripts
+- `dynamic-version:install-scripts` - Update scripts only
+- `prebuild` - Auto-regenerate version before `npm run build`
+- `predev` - Auto-regenerate version before `npm run dev`
+- `prestart` - Auto-regenerate version before `npm run start`
 
 **Options:**
 - `--increment-patch`: Increment patch version with each commit (deprecated in favor of file-based system)
 - `--silent, -s`: Suppress console output
 - `--fail/--no-fail`: Exit with error code on failures
 
-### 3. Install Scripts Only
+### 3. Bump Version
+```bash
+npx @justinhaaheim/version-manager bump [options]
+```
+- Increments version in `version-manager.json` based on current computed version
+- Regenerates `dynamic-version.local.json`
+- Optionally commits the change
+
+**Options:**
+- `--major`: Bump major version (e.g., 1.2.3 → 2.0.0)
+- `--minor`: Bump minor version (e.g., 1.2.3 → 1.3.0)
+- `--patch`: Bump patch version (e.g., 1.2.3 → 1.2.4) - **default**
+- `--runtime, -r`: Also update runtimeVersion to match codeVersion
+- `--commit, -c`: Auto-commit the version change
+- `--message, -m`: Custom commit message (only with --commit)
+
+**Examples:**
+```bash
+npx @justinhaaheim/version-manager bump                # Bump patch (default)
+npx @justinhaaheim/version-manager bump --minor        # Bump minor version
+npx @justinhaaheim/version-manager bump --commit       # Bump and commit
+npx @justinhaaheim/version-manager bump --runtime      # Bump code + runtime
+```
+
+### 4. Install Scripts Only
 ```bash
 npx @justinhaaheim/version-manager install-scripts
 ```
@@ -332,6 +364,29 @@ Be aware that messages from the user may contain speech-to-text (S2T) artifacts.
 
 ## Version Bumping Workflow
 
+### Automated Bumping (Recommended)
+
+Use the `bump` command to automatically increment versions:
+
+```bash
+# Bump patch version (0.1.11 → 0.1.12)
+npx @justinhaaheim/version-manager bump
+
+# Bump minor version (0.1.11 → 0.2.0)
+npx @justinhaaheim/version-manager bump --minor
+
+# Bump major version (0.1.11 → 1.0.0)
+npx @justinhaaheim/version-manager bump --major
+
+# Bump and update runtime version too
+npx @justinhaaheim/version-manager bump --minor --runtime
+
+# Bump and auto-commit
+npx @justinhaaheim/version-manager bump --commit
+```
+
+### Manual Bumping
+
 To bump the base version manually:
 
 1. Edit `version-manager.json` and update `codeVersionBase` (e.g., from "0.1.0" to "0.2.0")
@@ -341,3 +396,24 @@ To bump the base version manually:
 To update runtime version (only when native changes require it):
 1. Edit `runtimeVersion` in `version-manager.json`
 2. Commit the change
+
+## Version File Regeneration
+
+The `dynamic-version.local.json` file is automatically regenerated in two ways:
+
+### 1. Git Hooks (Automatic)
+When git hooks are installed, the version file regenerates on:
+- `post-commit` - After every commit
+- `post-checkout` - When switching branches
+- `post-merge` - After merging branches
+- `post-rewrite` - After rebasing
+
+### 2. Build Hooks (Automatic)
+When scripts are installed via `install` command, npm lifecycle hooks regenerate the version before:
+- `npm run build` - Via `prebuild` hook
+- `npm run dev` - Via `predev` hook
+- `npm run start` - Via `prestart` hook
+
+This ensures the version file is always fresh when starting dev servers or building for production, even if you haven't committed recently.
+
+**Note:** Build hooks use `--silent --no-fail` flags to avoid breaking builds if version generation encounters issues.

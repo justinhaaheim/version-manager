@@ -14,17 +14,17 @@ interface ScriptEntry {
 
 const DEFAULT_SCRIPTS: ScriptEntry[] = [
   {
-    command: 'npx @justinhaaheim/version-manager --install',
+    command: 'npx @justinhaaheim/version-manager install',
     description: 'Install git hooks and generate version file',
     name: 'dynamic-version',
   },
   {
-    command: 'npx @justinhaaheim/version-manager --install',
+    command: 'npx @justinhaaheim/version-manager install',
     description: 'Install git hooks and generate version file',
     name: 'dynamic-version:install',
   },
   {
-    command: 'npx @justinhaaheim/version-manager --install-scripts',
+    command: 'npx @justinhaaheim/version-manager install-scripts',
     description: 'Add/update dynamic-version scripts in package.json',
     name: 'dynamic-version:install-scripts',
   },
@@ -32,6 +32,25 @@ const DEFAULT_SCRIPTS: ScriptEntry[] = [
     command: 'npx @justinhaaheim/version-manager',
     description: 'Generate an up-to-date version file',
     name: 'dynamic-version:generate',
+  },
+];
+
+// Build hooks that regenerate version before dev/build/start
+const BUILD_HOOK_SCRIPTS: ScriptEntry[] = [
+  {
+    command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+    description: 'Regenerate version before build',
+    name: 'prebuild',
+  },
+  {
+    command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+    description: 'Regenerate version before dev server',
+    name: 'predev',
+  },
+  {
+    command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+    description: 'Regenerate version before start',
+    name: 'prestart',
   },
 ];
 
@@ -87,7 +106,10 @@ export function writePackageJson(packageJson: PackageJson): boolean {
   }
 }
 
-export function addScriptsToPackageJson(force = false): {
+export function addScriptsToPackageJson(
+  force = false,
+  includeBuildHooks = true,
+): {
   conflictsOverwritten: string[];
   message: string;
   success: boolean;
@@ -121,8 +143,13 @@ export function addScriptsToPackageJson(force = false): {
 
   const conflictsOverwritten: string[] = [];
 
+  // Combine default scripts with build hooks if requested
+  const scriptsToAdd = includeBuildHooks
+    ? [...DEFAULT_SCRIPTS, ...BUILD_HOOK_SCRIPTS]
+    : DEFAULT_SCRIPTS;
+
   // Add or update scripts
-  for (const script of DEFAULT_SCRIPTS) {
+  for (const script of scriptsToAdd) {
     if (
       packageJson.scripts[script.name] &&
       packageJson.scripts[script.name] !== script.command
@@ -152,10 +179,18 @@ export function addScriptsToPackageJson(force = false): {
   };
 }
 
-export function listDefaultScripts(): void {
+export function listDefaultScripts(includeBuildHooks = true): void {
   console.log('\nDefault dynamic-version scripts:');
   for (const script of DEFAULT_SCRIPTS) {
     console.log(`  ${script.name}: ${script.command}`);
     console.log(`    # ${script.description}`);
+  }
+
+  if (includeBuildHooks) {
+    console.log('\nBuild hooks (auto-regenerate version):');
+    for (const script of BUILD_HOOK_SCRIPTS) {
+      console.log(`  ${script.name}: ${script.command}`);
+      console.log(`    # ${script.description}`);
+    }
   }
 }

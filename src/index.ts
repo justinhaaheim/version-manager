@@ -160,7 +160,7 @@ async function installCommand(
           '   ℹ️  Existing dynamic-version scripts detected. Preserving customizations.',
         );
       } else {
-        const result = addScriptsToPackageJson(false);
+        const result = addScriptsToPackageJson(false, true);
         if (result.success) {
           console.log(`   ✅ ${result.message}`);
           console.log('\n   Added scripts:');
@@ -173,6 +173,10 @@ async function installCommand(
           console.log(
             '   - npm run dynamic-version:install-scripts  # Update scripts',
           );
+          console.log('\n   Added build hooks (auto-regenerate version):');
+          console.log('   - prebuild   # Runs before npm run build');
+          console.log('   - predev     # Runs before npm run dev');
+          console.log('   - prestart   # Runs before npm run start');
         } else {
           console.log(`   ⚠️  ${result.message}`);
         }
