@@ -173,7 +173,9 @@ async function installCommand(
           console.log(
             '   - npm run dynamic-version:install-scripts  # Update scripts',
           );
-          console.log('\n   Added build hooks (auto-regenerate version):');
+          console.log(
+            '\n   Added lifecycle scripts (auto-regenerate version):',
+          );
           console.log('   - prebuild   # Runs before npm run build');
           console.log('   - predev     # Runs before npm run dev');
           console.log('   - prestart   # Runs before npm run start');

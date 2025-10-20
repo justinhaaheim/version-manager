@@ -35,8 +35,8 @@ const DEFAULT_SCRIPTS: ScriptEntry[] = [
   },
 ];
 
-// Build hooks that regenerate version before dev/build/start
-const BUILD_HOOK_SCRIPTS: ScriptEntry[] = [
+// Lifecycle scripts that regenerate version before dev/build/start
+const LIFECYCLE_SCRIPTS: ScriptEntry[] = [
   {
     command: 'npx @justinhaaheim/version-manager --silent --no-fail',
     description: 'Regenerate version before build',
@@ -108,7 +108,7 @@ export function writePackageJson(packageJson: PackageJson): boolean {
 
 export function addScriptsToPackageJson(
   force = false,
-  includeBuildHooks = true,
+  includeLifecycleScripts = true,
 ): {
   conflictsOverwritten: string[];
   message: string;
@@ -143,9 +143,9 @@ export function addScriptsToPackageJson(
 
   const conflictsOverwritten: string[] = [];
 
-  // Combine default scripts with build hooks if requested
-  const scriptsToAdd = includeBuildHooks
-    ? [...DEFAULT_SCRIPTS, ...BUILD_HOOK_SCRIPTS]
+  // Combine default scripts with lifecycle scripts if requested
+  const scriptsToAdd = includeLifecycleScripts
+    ? [...DEFAULT_SCRIPTS, ...LIFECYCLE_SCRIPTS]
     : DEFAULT_SCRIPTS;
 
   // Add or update scripts
@@ -179,16 +179,16 @@ export function addScriptsToPackageJson(
   };
 }
 
-export function listDefaultScripts(includeBuildHooks = true): void {
+export function listDefaultScripts(includeLifecycleScripts = true): void {
   console.log('\nDefault dynamic-version scripts:');
   for (const script of DEFAULT_SCRIPTS) {
     console.log(`  ${script.name}: ${script.command}`);
     console.log(`    # ${script.description}`);
   }
 
-  if (includeBuildHooks) {
-    console.log('\nBuild hooks (auto-regenerate version):');
-    for (const script of BUILD_HOOK_SCRIPTS) {
+  if (includeLifecycleScripts) {
+    console.log('\nLifecycle scripts (auto-regenerate version):');
+    for (const script of LIFECYCLE_SCRIPTS) {
       console.log(`  ${script.name}: ${script.command}`);
       console.log(`    # ${script.description}`);
     }
