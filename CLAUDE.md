@@ -132,7 +132,7 @@ docs/
 **index.ts** (CLI)
 - Entry point when run as `npx @justinhaaheim/version-manager`
 - Uses yargs for command parsing
-- Three commands: default (generate), install, install-scripts
+- Four commands: default (generate), install, install-scripts, bump
 - Handles user prompts for .gitignore and version-manager.json
 - Orchestrates calls to other modules
 - Includes `require.main === module` check for direct execution
@@ -247,6 +247,7 @@ docs/
 
 **Runtime:**
 - `yargs` (18.0.0) - CLI argument parsing
+- `zod` (4.1.12) - Schema validation for version files
 
 **Dev:**
 - `typescript` (~5.8.3) - Type checking and compilation

@@ -1,401 +1,432 @@
 # @justinhaaheim/version-manager
 
-Generate unique version identifiers for every commit in your React/React Native projects. Easily identify which exact version of code is running during development, especially with multiple branches and dev servers.
-
-Also includes a comprehensive version tracking system for JavaScript/TypeScript projects with support for semantic versioning, build numbers, runtime versions, and release versions.
+A file-based version tracking system for JavaScript/TypeScript projects. Automatically calculates version numbers based on git commit history since your last manual version bump.
 
 ## Features
 
-### Version Generation (generate-version)
-
-- 🔍 **Unique version for every commit** - Uses `git describe` with branch info
-- 🏷️ **Human-readable format** - Shows meaningful versions like "0.2.11+5 (feature-auth)"
-- ⚠️ **Dirty state indicator** - Asterisk (\*) shows uncommitted changes
-- 🌲 **Branch awareness** - Always know which branch the code is from
-- 📦 **Zero dependencies for generation** - Lightweight and fast
-- 🔧 **Zero config** - Works out of the box with any git repository
-- 💻 **TypeScript ready** - Full type definitions included
-
-### Version Management (version-manager)
-
-- **Multiple Version Types**: Track code versions, build numbers, runtime versions, and release versions independently
-- **Git Integration**: Automatically records branch and commit information with each version change
-- **Version History**: Maintains a history of version changes with timestamps and metadata
-- **Schema Validation**: Uses Zod for robust schema validation of version files
-- **Interactive CLI**: User-friendly interactive mode for version management
-- **Programmatic API**: Use as a library in your build scripts
+- **File-based versioning**: Uses `version-manager.json` as source of truth (committed to repo)
+- **Automatic version calculation**: Tracks commits since last `codeVersionBase` change
+- **Two calculation modes**:
+  - `add-to-patch`: Adds commit count to patch version (e.g., 1.3.0 + 5 commits → 1.3.5)
+  - `append-commits`: Appends commit count as metadata (e.g., 1.3.0 + 5 commits → 1.3.0+5)
+- **Git hooks integration**: Auto-generates version file on commits, checkouts, merges, rebases
+- **Build hooks**: Auto-regenerates version before `npm run build`, `dev`, and `start`
+- **Runtime version support**: Track OTA update compatibility separately from code version
+- **Zero runtime dependencies**: Uses only Node.js built-ins for fast installation
 
 ## Installation
 
 ```bash
-npm install --save-dev @justinhaaheim/version-manager
-# or
-yarn add -D @justinhaaheim/version-manager
-# or
-bun add -D @justinhaaheim/version-manager
+npx @justinhaaheim/version-manager install
 ```
 
-## Quick Start - Version Generation
+This will:
 
-No installation required! Run directly with npx:
+- Create `version-manager.json` (committed - your version configuration)
+- Install git hooks that auto-regenerate versions on git operations
+- Add npm scripts to your `package.json` for manual regeneration
+- Generate `dynamic-version.local.json` (gitignored - computed versions)
+- Add `*.local.json` to your `.gitignore`
 
-```bash
-npx @justinhaaheim/version-manager generate-version
-```
+## Quick Start
 
-This creates a `package-versions.json` file in your project root:
+1. **Install** (one-time setup):
+
+   ```bash
+   npx @justinhaaheim/version-manager install
+   ```
+
+2. **Use in your code**:
+
+   ```typescript
+   // Import the reader
+   import {readDynamicVersion} from '@justinhaaheim/version-manager/reader';
+
+   // Get version info
+   const {codeVersion, runtimeVersion, buildNumber} = readDynamicVersion();
+   console.log(`App version: ${codeVersion}`);
+   ```
+
+3. **Bump versions when ready**:
+
+   ```bash
+   # Bump patch version (0.1.5 → 0.1.6)
+   npx @justinhaaheim/version-manager bump --commit
+
+   # Bump minor version (0.1.6 → 0.2.0)
+   npx @justinhaaheim/version-manager bump --minor --commit --tag
+   ```
+
+## How It Works
+
+### Version Files
+
+**`version-manager.json`** (committed to git):
 
 ```json
 {
-  "describe": "v0.2.11-5-g3a7f9b2-dirty",
-  "branch": "feature-auth",
-  "dirty": true,
-  "timestamp": "2024-12-20T19:45:30.123Z",
-  "humanReadable": "0.2.11+5 (feature-auth) *",
-  "components": {
-    "baseVersion": "0.2.11",
-    "commitsSince": 5,
-    "shortHash": "3a7f9b2"
-  }
+  "codeVersionBase": "0.1.0",
+  "runtimeVersion": "0.1.0",
+  "versionCalculationMode": "add-to-patch"
 }
 ```
 
-## Quick Start - Version Management
+- This is your source of truth
+- Edit `codeVersionBase` when you want to bump the base version
+- The tool counts commits since the last time this value changed
 
-1. Initialize your project with a `projectVersions.json` file:
+**`dynamic-version.local.json`** (gitignored, auto-generated):
 
 ```json
 {
-  "codeVersion": "1.0.0",
-  "buildNumber": "1",
-  "runtimeVersion": "1.0.0",
-  "releaseVersion": "1.0.0",
-  "codeVersionHistory": {},
-  "runtimeVersions": {}
+  "codeVersion": "0.1.5",
+  "runtimeVersion": "0.1.0",
+  "buildNumber": "20251021.123456.789",
+  "timestamp": "2025-10-21T12:34:56.789Z",
+  "generationTrigger": "post-commit",
+  "branch": "main",
+  "dirty": false
 }
 ```
 
-2. Use the CLI:
+- Automatically regenerated by git hooks and build scripts
+- Never commit this file
+- Contains the computed `codeVersion` based on commits since last bump
+
+### Version Calculation
+
+The tool uses git history to calculate versions automatically:
+
+1. Reads `codeVersionBase` from `version-manager.json` (e.g., "0.1.0")
+2. Finds the last commit where `codeVersionBase` **value** changed
+3. Counts commits from that point to HEAD (e.g., 5 commits)
+4. Calculates `codeVersion` based on your mode:
+   - **`add-to-patch`**: `0.1.0` + 5 commits → `0.1.5`
+   - **`append-commits`**: `0.1.0` + 5 commits → `0.1.0+5`
+
+## Commands
+
+### 1. Generate Version File (default)
 
 ```bash
-# Interactive mode
-npx version-manager
-
-# Bump code version (for OTA updates)
-npx version-manager --bump
-
-# Bump for a new build (increments both code version and build number)
-npx version-manager --bump-for-build
-
-# Show current versions
-npx version-manager --show
+npx @justinhaaheim/version-manager [options]
 ```
 
-## Version Types Explained
+Generates `dynamic-version.local.json` with computed versions.
+
+**Options:**
+
+- `--output, -o <path>`: Output file path (default: ./dynamic-version.local.json)
+- `--silent, -s`: Suppress console output
+- `--fail/--no-fail`: Exit with error code on failures (default: true)
+
+**Example:**
+
+```bash
+npx @justinhaaheim/version-manager
+npx @justinhaaheim/version-manager --output ./src/version.json
+```
+
+### 2. Install Git Hooks and Scripts
+
+```bash
+npx @justinhaaheim/version-manager install [options]
+```
+
+Installs git hooks and adds npm scripts to your `package.json`.
+
+**Git hooks installed:**
+
+- `post-commit` - Regenerate version after commits
+- `post-checkout` - Regenerate version after branch switches
+- `post-merge` - Regenerate version after merges
+- `post-rewrite` - Regenerate version after rebases
+
+**Scripts added to package.json:**
+
+- `dynamic-version:generate` - Generate version file manually
+- `dynamic-version:install` - Reinstall git hooks
+- `dynamic-version:install-scripts` - Update scripts only
+- `prebuild` - Auto-regenerate version before `npm run build`
+- `predev` - Auto-regenerate version before `npm run dev`
+- `prestart` - Auto-regenerate version before `npm run start`
+
+**Options:**
+
+- `--silent, -s`: Suppress console output
+- `--fail/--no-fail`: Exit with error code on failures
+
+### 3. Bump Version
+
+```bash
+npx @justinhaaheim/version-manager bump [options]
+```
+
+Increments the version in `version-manager.json` based on the current computed version.
+
+**Options:**
+
+- `--major`: Bump major version (e.g., 1.2.3 → 2.0.0)
+- `--minor`: Bump minor version (e.g., 1.2.3 → 1.3.0)
+- `--patch`: Bump patch version (e.g., 1.2.3 → 1.2.4) - **default**
+- `--runtime, -r`: Also update runtimeVersion to match codeVersion
+- `--commit, -c`: Auto-commit the version change
+- `--tag, -t`: Create git tag (requires --commit)
+- `--push, -p`: Push commit and tag to remote (requires --commit)
+- `--message, -m <msg>`: Custom commit message (only with --commit)
+
+**Examples:**
+
+```bash
+# Bump patch version (default)
+npx @justinhaaheim/version-manager bump
+
+# Bump minor version and commit
+npx @justinhaaheim/version-manager bump --minor --commit
+
+# Bump major, commit, tag, and push
+npx @justinhaaheim/version-manager bump --major --commit --tag --push
+
+# Bump and update runtime version too
+npx @justinhaaheim/version-manager bump --minor --runtime --commit
+
+# Short form
+npx @justinhaaheim/version-manager bump -c -t -p
+```
+
+### 4. Install Scripts Only
+
+```bash
+npx @justinhaaheim/version-manager install-scripts
+```
+
+Only updates `package.json` scripts (doesn't touch git hooks). Useful if you want to update scripts after package upgrades.
+
+## Version Types
 
 ### Code Version (`codeVersion`)
 
-The main application version that increments with every meaningful code change.
+The automatically calculated application version based on git commit history.
 
-- **When to increment**: Every commit that changes application behavior, UI, or logic
-- **Format**: Semantic versioning (MAJOR.MINOR.PATCH)
-- **Used for**: Tracking code changes, displaying to users, changelog
-
-### Build Number (`buildNumber`)
-
-A monotonically increasing integer for each build submitted to app stores.
-
-- **When to increment**: Every build that goes to TestFlight, App Store, or other distribution
-- **Format**: Integer (stored as string)
-- **Used for**: iOS/Android build identification, app store requirements
+- **Format**: Semantic versioning (e.g., `0.1.5` or `0.1.0+5`)
+- **Calculated from**: Commits since last `codeVersionBase` change
+- **Used for**: App version display, tracking deployments
 
 ### Runtime Version (`runtimeVersion`)
 
-Defines the native runtime compatibility boundary for over-the-air updates.
+Defines the native runtime compatibility boundary for over-the-air (OTA) updates.
 
-- **When to increment**: Only when making breaking native changes
-- **Format**: Semantic versioning
-- **Used for**: OTA update compatibility
+- **Format**: Semantic versioning (e.g., `1.0.0`)
+- **When to update**: Only when making breaking native changes
+- **Used for**: OTA update compatibility (Expo/React Native)
 - **Breaking changes include**:
   - Adding/removing native dependencies
-  - Changing app permissions or entitlements
+  - Changing app permissions
   - Modifying native configuration
   - Updating SDK versions
 
-### Release Version (`releaseVersion`)
+### Build Number (`buildNumber`)
 
-The public-facing version shown in app stores.
+Optional build identifier from `BUILD_NUMBER` environment variable.
 
-- **When to increment**: Major releases, marketing milestones
-- **Format**: Semantic versioning
-- **Used for**: App store display, marketing
+- **Format**: Timestamp or CI build number (e.g., `20251021.123456.789`)
+- **When set**: Include `BUILD_NUMBER` env var when generating
+- **Used for**: Build tracking, CI/CD pipelines
 
-## Version Generation Usage
+## Usage Examples
 
-### Generate Version CLI
+### In React/React Native
 
-```bash
-npx @justinhaaheim/version-manager generate-version [options]
+```typescript
+import { readDynamicVersion } from '@justinhaaheim/version-manager/reader';
 
-Options:
-  -o, --output <path>  Output file path (default: ./package-versions.json)
-  -s, --silent         Suppress console output
-  -h, --help           Show help
-```
+const { codeVersion, runtimeVersion } = readDynamicVersion();
 
-### Integration with Build Scripts
-
-Add to your `package.json` scripts:
-
-```json
-{
-  "scripts": {
-    "dev": "npx @justinhaaheim/version-manager generate-version && vite",
-    "build": "npx @justinhaaheim/version-manager generate-version && vite build",
-    "start": "npx @justinhaaheim/version-manager generate-version && react-scripts start"
-  }
-}
-```
-
-### Using in React Components
-
-```tsx
-// VersionDisplay.tsx
-import versionInfo from '../package-versions.json';
-
-export const VersionDisplay = () => {
-  // Only show in development
-  if (process.env.NODE_ENV === 'production') return null;
-
+export function VersionDisplay() {
   return (
-    <div
-      style={{
-        position: 'fixed',
-        bottom: 4,
-        right: 4,
-        padding: '2px 8px',
-        fontSize: '11px',
-        fontFamily: 'monospace',
-        background: 'rgba(0,0,0,0.8)',
-        color: versionInfo.dirty ? '#ffaa00' : '#00ff00',
-        borderRadius: 3,
-        pointerEvents: 'none',
-        zIndex: 9999,
-      }}>
-      {versionInfo.humanReadable}
+    <div style={{
+      position: 'fixed',
+      bottom: 4,
+      right: 4,
+      fontSize: 11,
+      fontFamily: 'monospace',
+      background: 'rgba(0,0,0,0.8)',
+      color: '#00ff00',
+      padding: '2px 8px',
+      borderRadius: 3,
+    }}>
+      v{codeVersion}
     </div>
   );
-};
-```
-
-### TypeScript Support for Version Generation
-
-Add type declarations to your project:
-
-```typescript
-// types/package-versions.d.ts
-declare module '*/package-versions.json' {
-  export interface VersionInfo {
-    describe: string;
-    branch: string;
-    dirty: boolean;
-    timestamp: string;
-    humanReadable: string;
-    components: {
-      baseVersion: string;
-      commitsSince: number;
-      shortHash: string;
-    } | null;
-  }
-
-  const versionInfo: VersionInfo;
-  export default versionInfo;
 }
 ```
 
-### Version Format
-
-The human-readable version format follows this pattern:
-
-- **Tagged commits**: `0.2.11` (when exactly on a tag)
-- **Commits after tag**: `0.2.11+5` (5 commits after v0.2.11)
-- **Non-main branch**: `0.2.11+5 (feature-auth)`
-- **Uncommitted changes**: `0.2.11+5 (feature-auth) *`
-- **No tags yet**: `untagged (main)`
-
-### Edge Cases
-
-The package handles these scenarios gracefully:
-
-- **No git tags yet**: Falls back to showing "untagged" with branch name
-- **Not a git repository**: Shows clear error message
-- **Detached HEAD state**: Shows "HEAD" as branch name
-- **Uncommitted changes**: Adds "-dirty" suffix and asterisk to human-readable version
-
-## Version Management CLI Usage
-
-### Commands
-
-```bash
-# Interactive mode - presents a menu of options
-npx version-manager
-
-# Increment code version only (patch by default)
-npx version-manager --bump
-npx version-manager --bump --major
-npx version-manager --bump --minor
-
-# Increment both code version and build number
-npx version-manager --bump-for-build
-
-# Increment build number only
-npx version-manager --build-only
-
-# Update runtime version (use with caution)
-npx version-manager --bump --minor --update-runtime
-
-# Show current versions
-npx version-manager --show
-
-# Show version history
-npx version-manager --history
-
-# Repair corrupted version file
-npx version-manager --repair
-```
-
-### Options
-
-- `--bump, -b`: Increment code version only
-- `--bump-for-build, -B`: Increment both code version and build number
-- `--build-only`: Increment build number only
-- `--major`: Bump major version (1.0.0 -> 2.0.0)
-- `--minor`: Bump minor version (0.1.0 -> 0.2.0)
-- `--update-runtime`: Update runtime version to match code version
-- `--channel`: Specify update channel (development/preview/production)
-- `--profile`: Specify build profile
-- `--message, -m`: Add a message to the version history
-- `--commit, -c`: Automatically commit the version changes
-- `--show`: Show current versions
-- `--history`: Show version history
-- `--repair`: Attempt to repair invalid schema
-
-## Programmatic API
-
-```typescript
-import {VersionManager} from '@justinhaaheim/version-manager';
-
-const manager = new VersionManager({
-  versionsFilePath: './projectVersions.json', // optional, defaults to cwd
-});
-
-// Read current versions
-const versions = manager.readVersions();
-console.log(versions.codeVersion);
-
-// Increment versions
-const newVersion = manager.incrementCodeVersion(versions.codeVersion, 'minor');
-const newBuildNumber = manager.incrementBuildNumber(versions.buildNumber);
-
-// Update and save
-versions.codeVersion = newVersion;
-versions.buildNumber = newBuildNumber;
-manager.writeVersions(versions);
-
-// Get git information
-const gitInfo = manager.getGitInfo();
-console.log(gitInfo.branch, gitInfo.commit);
-```
-
-## Integration Examples
-
-### With package.json scripts
-
-```json
-{
-  "scripts": {
-    "version:bump": "version-manager --bump",
-    "version:build": "version-manager --bump-for-build",
-    "build:ios": "npm run version:build && xcodebuild ...",
-    "release:ota": "npm run version:bump && eas update ..."
-  }
-}
-```
-
-### With Expo/React Native
+### In Expo/React Native `app.config.js`
 
 ```javascript
-// app.config.js or app.config.ts
-const versions = require('./projectVersions.json');
+const {readDynamicVersion} = require('@justinhaaheim/version-manager/reader');
 
-export default {
-  version: versions.codeVersion,
-  ios: {
-    buildNumber: versions.buildNumber,
+const {codeVersion, runtimeVersion, buildNumber} = readDynamicVersion();
+
+module.exports = {
+  expo: {
+    name: 'My App',
+    version: codeVersion,
+    runtimeVersion: runtimeVersion,
+    ios: {
+      buildNumber: buildNumber || '1',
+    },
+    android: {
+      versionCode: parseInt(buildNumber || '1'),
+    },
   },
-  android: {
-    versionCode: parseInt(versions.buildNumber),
-  },
-  runtimeVersion: versions.runtimeVersion,
 };
 ```
 
-### With CI/CD
+### In CI/CD
 
 ```yaml
-# GitHub Actions example
-- name: Bump version for build
-  run: npx version-manager --bump-for-build --commit
+# GitHub Actions
+- name: Set build number
+  run: echo "BUILD_NUMBER=$(date +%Y%m%d.%H%M%S.%N | cut -b1-20)" >> $GITHUB_ENV
+
+- name: Generate version
+  run: npx @justinhaaheim/version-manager
 
 - name: Build app
   run: npm run build
 ```
 
-## Version History
+### In package.json scripts
 
-The tool maintains a history of version changes in the `codeVersionHistory` object within `projectVersions.json`. Each entry includes:
+The `install` command adds these scripts automatically:
 
-- Timestamp
-- Git branch and commit hash
-- Type of change (build/update)
-- Optional channel, profile, and message
+```json
+{
+  "scripts": {
+    "dynamic-version:generate": "npx @justinhaaheim/version-manager",
+    "dynamic-version:install": "npx @justinhaaheim/version-manager install",
+    "dynamic-version:install-scripts": "npx @justinhaaheim/version-manager install-scripts",
+    "prebuild": "npm run dynamic-version:generate -- --silent --no-fail",
+    "predev": "npm run dynamic-version:generate -- --silent --no-fail",
+    "prestart": "npm run dynamic-version:generate -- --silent --no-fail"
+  }
+}
+```
 
-The history is automatically pruned to keep the last 50 entries to prevent file bloat.
+## Version Calculation Modes
+
+### `add-to-patch` (recommended)
+
+Adds the commit count to the patch version number.
+
+**Example:**
+
+- `codeVersionBase`: `1.3.0`
+- Commits since last change: `5`
+- **Result**: `1.3.5`
+
+Best for projects that want natural semver progression.
+
+### `append-commits`
+
+Appends the commit count as build metadata.
+
+**Example:**
+
+- `codeVersionBase`: `1.3.0`
+- Commits since last change: `5`
+- **Result**: `1.3.0+5`
+
+Best for pre-release/dev builds where you want to see commit count explicitly.
+
+## TypeScript Support
+
+The package includes full TypeScript definitions. For the generated file:
+
+```typescript
+// Add to your project's types
+declare module '*/dynamic-version.local.json' {
+  interface DynamicVersion {
+    codeVersion: string;
+    runtimeVersion: string;
+    buildNumber?: string;
+    timestamp?: string;
+    generationTrigger?: string;
+    branch?: string;
+    dirty?: boolean;
+  }
+
+  const version: DynamicVersion;
+  export default version;
+}
+```
+
+## Git Hooks Management
+
+The tool intelligently manages git hooks:
+
+- Detects Husky and adjusts hook format accordingly
+- Smart updates: appends to new hooks, replaces matching lines in existing hooks
+- Respects `core.hooksPath` git config
+- Makes hooks executable automatically
+- Won't duplicate hook commands
+
+To bypass hooks temporarily:
+
+```bash
+git commit --no-verify
+```
 
 ## Troubleshooting
 
-### Schema Validation Errors
+### Version file not updating
 
-If your `projectVersions.json` becomes corrupted:
-
-```bash
-npx version-manager --repair
-```
-
-This will attempt to salvage valid data and create a valid schema.
-
-### Git Integration Issues
-
-The tool will warn about uncommitted changes but will still allow version bumps. To check git status:
+Make sure git hooks are installed:
 
 ```bash
-git status
+npx @justinhaaheim/version-manager install
 ```
 
-### Version Conflicts
+### Missing .gitignore entry
 
-If you need to manually edit versions, ensure the `projectVersions.json` follows the schema:
+The tool will prompt you to add `*.local.json` to `.gitignore`. You can add it manually:
 
-```typescript
-{
-  codeVersion: string,      // Semantic version
-  buildNumber: string,      // Numeric string
-  runtimeVersion: string,   // Semantic version
-  releaseVersion: string,   // Semantic version
-  codeVersionHistory: {},   // Version history entries
-  runtimeVersions: {}       // Runtime version entries
-}
+```bash
+echo "*.local.json" >> .gitignore
 ```
+
+### Reading version file fails
+
+Make sure you've generated it at least once:
+
+```bash
+npx @justinhaaheim/version-manager
+```
+
+### Git hooks not working with Husky
+
+The tool detects Husky automatically. If you have issues, try reinstalling:
+
+```bash
+npx @justinhaaheim/version-manager install
+```
+
+## Migration from Other Systems
+
+### From tag-based versioning
+
+If you're using git tags like `v1.2.3`:
+
+1. Find your latest tag: `git describe --tags --abbrev=0`
+2. Set that as your `codeVersionBase` in `version-manager.json`
+3. Future versions will calculate from there
+
+### From manual versioning
+
+1. Set your current version in `version-manager.json`
+2. Run `npx @justinhaaheim/version-manager install`
+3. Versions will auto-increment from there
 
 ## Contributing
 
@@ -407,5 +438,4 @@ MIT © Justin Haaheim
 
 ## See Also
 
-- [VERSIONING.md](./VERSIONING.md) - Detailed versioning guide and workflows
-- [CLAUDE.md](./CLAUDE.md) - Development instructions and guidelines
+- [CLAUDE.md](./CLAUDE.md) - Development instructions and codebase overview
