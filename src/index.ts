@@ -44,6 +44,12 @@ const globalOptions = {
       'Exit with error code on failures (use --no-fail to always exit 0)',
     type: 'boolean' as const,
   },
+  'git-hook': {
+    default: false,
+    describe: 'Triggered by git hook (internal use)',
+    hidden: true,
+    type: 'boolean' as const,
+  },
   output: {
     alias: 'o',
     default: './dynamic-version.local.json',
@@ -62,6 +68,7 @@ const globalOptions = {
 async function generateVersionFile(
   outputPath: string,
   silent: boolean,
+  gitHook = false,
 ): Promise<void> {
   // Check if .local.json is in .gitignore
   const gitignoreOk = checkGitignore();
@@ -108,7 +115,9 @@ async function generateVersionFile(
   }
 
   // Generate version info using file-based approach
-  const versionInfo = await generateFileBasedVersion();
+  const versionInfo = await generateFileBasedVersion(
+    gitHook ? 'git-hook' : 'cli',
+  );
 
   // Write to dynamic-version.local.json
   const finalOutputPath =
@@ -132,9 +141,10 @@ async function installCommand(
   outputPath: string,
   silent: boolean,
   noFail: boolean,
+  gitHook = false,
 ): Promise<void> {
   // First, generate the version file
-  await generateVersionFile(outputPath, silent);
+  await generateVersionFile(outputPath, silent, gitHook);
 
   if (!silent) {
     console.log('\n📦 Installing git hooks...');
@@ -251,6 +261,7 @@ async function bumpCommand(
   silent: boolean,
   commit: boolean,
   message?: string,
+  gitHook = false,
 ): Promise<void> {
   // Bump the version
   const result = await bumpVersion(bumpType, updateRuntime, silent);
@@ -259,7 +270,7 @@ async function bumpCommand(
   if (!silent) {
     console.log('📝 Regenerating dynamic-version.local.json...');
   }
-  await generateVersionFile('./dynamic-version.local.json', silent);
+  await generateVersionFile('./dynamic-version.local.json', silent, gitHook);
 
   // Optionally commit
   if (commit) {
@@ -310,7 +321,7 @@ async function main() {
         'Generate version file',
         (yargsInstance) => yargsInstance.options(globalOptions),
         async (args) => {
-          await generateVersionFile(args.output, args.silent);
+          await generateVersionFile(args.output, args.silent, args['git-hook']);
         },
       )
       .command(
@@ -331,6 +342,7 @@ async function main() {
             args.output,
             args.silent,
             !args.fail,
+            args['git-hook'],
           );
         },
       )
@@ -406,6 +418,7 @@ async function main() {
             args.silent,
             args.commit,
             args.message,
+            args['git-hook'],
           );
         },
       )

@@ -36,10 +36,16 @@ export const VersionManagerConfigSchema = z.object({
   versionCalculationMode: VersionCalculationModeSchema,
 });
 
+export const GenerationTriggerSchema = z.enum(['git-hook', 'cli']);
+
 export const DynamicVersionSchema = z.object({
-  buildNumber: z.string().optional(),
+  branch: z.string(),
+  buildNumber: z.string(),
   codeVersion: z.string(),
+  dirty: z.boolean(),
+  generationTrigger: GenerationTriggerSchema,
   runtimeVersion: z.string(),
+  timestamp: z.string(),
 });
 
 // Infer TypeScript types from Zod schemas (single source of truth)
@@ -52,4 +58,5 @@ export type VersionCalculationMode = z.infer<
   typeof VersionCalculationModeSchema
 >;
 export type VersionManagerConfig = z.infer<typeof VersionManagerConfigSchema>;
+export type GenerationTrigger = z.infer<typeof GenerationTriggerSchema>;
 export type DynamicVersion = z.infer<typeof DynamicVersionSchema>;

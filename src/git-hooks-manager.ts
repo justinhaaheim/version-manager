@@ -250,7 +250,8 @@ export function installGitHooks(
   const incrementFlag = incrementPatch ? ' --increment-patch' : '';
   const silentFlag = silent ? ' --silent' : '';
   const noFailFlag = noFail ? ' --no-fail' : '';
-  const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}`;
+  const gitHookFlag = ' --git-hook';
+  const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}${gitHookFlag}`;
 
   for (const hookName of HOOK_NAMES) {
     const hookPath = join(huskyDir, hookName);
