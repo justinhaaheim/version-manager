@@ -89,14 +89,18 @@ npx @justinhaaheim/version-manager bump [options]
 - `--patch`: Bump patch version (e.g., 1.2.3 → 1.2.4) - **default**
 - `--runtime, -r`: Also update runtimeVersion to match codeVersion
 - `--commit, -c`: Auto-commit the version change
+- `--tag, -t`: Create git tag (requires --commit)
+- `--push, -p`: Push commit and tag to remote (requires --commit)
 - `--message, -m`: Custom commit message (only with --commit)
 
 **Examples:**
 ```bash
-npx @justinhaaheim/version-manager bump                # Bump patch (default)
-npx @justinhaaheim/version-manager bump --minor        # Bump minor version
-npx @justinhaaheim/version-manager bump --commit       # Bump and commit
-npx @justinhaaheim/version-manager bump --runtime      # Bump code + runtime
+npx @justinhaaheim/version-manager bump                    # Bump patch (default)
+npx @justinhaaheim/version-manager bump --minor            # Bump minor version
+npx @justinhaaheim/version-manager bump --commit           # Bump and commit
+npx @justinhaaheim/version-manager bump --runtime          # Bump code + runtime
+npx @justinhaaheim/version-manager bump --commit --tag     # Bump, commit, and tag
+npx @justinhaaheim/version-manager bump -c -t -p           # Bump, commit, tag, and push
 ```
 
 ### 4. Install Scripts Only

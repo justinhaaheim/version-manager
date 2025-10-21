@@ -260,6 +260,8 @@ async function bumpCommand(
   updateRuntime: boolean,
   silent: boolean,
   commit: boolean,
+  tag: boolean,
+  push: boolean,
   message?: string,
   gitHook = false,
 ): Promise<void> {
@@ -296,6 +298,57 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
       if (!silent) {
         console.log('✅ Changes committed');
       }
+
+      // Optionally create git tag
+      if (tag) {
+        if (!silent) {
+          console.log(`🏷️  Creating git tag v${result.newVersion}...`);
+        }
+
+        const tagMessage = `Version ${result.newVersion}`;
+        try {
+          execSync(
+            `git tag -a v${result.newVersion} -m '${tagMessage.replace(/'/g, "'\\''")}'`,
+            {stdio: 'pipe'},
+          );
+
+          if (!silent) {
+            console.log(`✅ Tag v${result.newVersion} created`);
+          }
+        } catch (error) {
+          if (!silent) {
+            console.error('❌ Failed to create tag:', error);
+          }
+          throw error;
+        }
+      }
+
+      // Optionally push to remote
+      if (push) {
+        if (!silent) {
+          console.log('🚀 Pushing to remote...');
+        }
+
+        try {
+          // Push commits and tags together
+          if (tag) {
+            execSync('git push --follow-tags', {stdio: 'pipe'});
+            if (!silent) {
+              console.log('✅ Pushed commit and tag to remote');
+            }
+          } else {
+            execSync('git push', {stdio: 'pipe'});
+            if (!silent) {
+              console.log('✅ Pushed commit to remote');
+            }
+          }
+        } catch (error) {
+          if (!silent) {
+            console.error('❌ Failed to push:', error);
+          }
+          throw error;
+        }
+      }
     } catch (error) {
       if (!silent) {
         console.error('❌ Failed to commit:', error);
@@ -303,11 +356,14 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
       throw error;
     }
   } else if (!silent) {
-    console.log(
-      '\n💡 Tip: Commit this change with: git add version-manager.json && git commit -m "Bump version to ' +
-        result.newVersion +
-        '"',
-    );
+    let tip = `\n💡 Tip: Commit this change with: git add version-manager.json && git commit -m "Bump version to ${result.newVersion}"`;
+    if (tag && !commit) {
+      tip += `\n💡 Note: --tag requires --commit to create a git tag`;
+    }
+    if (push && !commit) {
+      tip += `\n💡 Note: --push requires --commit to push changes`;
+    }
+    console.log(tip);
   }
 }
 
@@ -386,10 +442,22 @@ async function main() {
               describe: 'Bump patch version (e.g., 1.2.3 -> 1.2.4)',
               type: 'boolean' as const,
             },
+            push: {
+              alias: 'p',
+              default: false,
+              describe: 'Push commit and tag to remote (requires --commit)',
+              type: 'boolean' as const,
+            },
             runtime: {
               alias: 'r',
               default: false,
               describe: 'Also update runtimeVersion to match',
+              type: 'boolean' as const,
+            },
+            tag: {
+              alias: 't',
+              default: false,
+              describe: 'Create git tag (requires --commit)',
               type: 'boolean' as const,
             },
           }),
@@ -417,6 +485,8 @@ async function main() {
             args.runtime,
             args.silent,
             args.commit,
+            args.tag,
+            args.push,
             args.message,
             args['git-hook'],
           );
