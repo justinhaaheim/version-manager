@@ -1,2 +1,2 @@
 # Dynamic version generator
-bun run test:local
+bun run test:local --git-hook

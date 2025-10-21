@@ -38,17 +38,20 @@ const DEFAULT_SCRIPTS: ScriptEntry[] = [
 // Lifecycle scripts that regenerate version before dev/build/start
 const LIFECYCLE_SCRIPTS: ScriptEntry[] = [
   {
-    command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+    // command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+    command: 'npx @justinhaaheim/version-manager',
     description: 'Regenerate version before build',
     name: 'prebuild',
   },
   {
-    command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+    // command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+    command: 'npx @justinhaaheim/version-manager',
     description: 'Regenerate version before dev server',
     name: 'predev',
   },
   {
-    command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+    // command: 'npx @justinhaaheim/version-manager --silent --no-fail',
+    command: 'npx @justinhaaheim/version-manager',
     description: 'Regenerate version before start',
     name: 'prestart',
   },
