@@ -297,10 +297,11 @@ export async function generateFileBasedVersion(
   if (!config) {
     // Return default version if config doesn't exist (using package.json version)
     return {
+      baseVersion,
       branch,
       buildNumber: generateBuildNumber(),
-      codeVersion: baseVersion,
       dirty,
+      dynamicVersion: baseVersion,
       generationTrigger,
       runtimeVersion: baseVersion,
       timestamp: new Date().toISOString(),
@@ -318,8 +319,8 @@ export async function generateFileBasedVersion(
     ? await countCommitsBetween(lastCommit, 'HEAD')
     : 0;
 
-  // Calculate code version
-  const codeVersion = calculateCodeVersion(
+  // Calculate dynamic version
+  const dynamicVersion = calculateCodeVersion(
     baseVersion,
     commitsSince,
     config.versionCalculationMode,
@@ -327,10 +328,11 @@ export async function generateFileBasedVersion(
 
   // Build result
   const result: DynamicVersion = {
+    baseVersion,
     branch,
     buildNumber: generateBuildNumber(),
-    codeVersion,
     dirty,
+    dynamicVersion,
     generationTrigger,
     runtimeVersion: config.runtimeVersion,
     timestamp: new Date().toISOString(),
@@ -439,7 +441,7 @@ export async function bumpVersion(
 
   // Generate current computed version to show user what it was
   const currentDynamic = await generateFileBasedVersion();
-  const oldVersion = currentDynamic.codeVersion;
+  const oldVersion = currentDynamic.dynamicVersion;
 
   // Increment from the current computed version (not the base)
   const newVersion = incrementVersion(oldVersion, bumpType);

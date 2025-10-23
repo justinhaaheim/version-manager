@@ -138,7 +138,8 @@ async function generateVersionFile(
 
   if (!silent) {
     console.log(`✅ Version generated:`);
-    console.log(`   Code version: ${versionInfo.codeVersion}`);
+    console.log(`   Base version: ${versionInfo.baseVersion}`);
+    console.log(`   Dynamic version: ${versionInfo.dynamicVersion}`);
     console.log(`   Runtime version: ${versionInfo.runtimeVersion}`);
     if (versionInfo.buildNumber) {
       console.log(`   Build number: ${versionInfo.buildNumber}`);
