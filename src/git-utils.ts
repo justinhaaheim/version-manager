@@ -136,3 +136,24 @@ export async function countCommitsBetween(
     return 0;
   }
 }
+
+/**
+ * Read a field value from a JSON file at a specific commit
+ * @param commit - Commit hash or ref
+ * @param filePath - Path to the JSON file (relative to repo root)
+ * @param fieldName - Name of the field to read
+ * @returns The field value, or null if not found
+ */
+export async function readFieldFromCommit(
+  commit: string,
+  filePath: string,
+  fieldName: string,
+): Promise<string | null> {
+  try {
+    const content = await execCommand(`git show ${commit}:${filePath}`);
+    const json = JSON.parse(content) as Record<string, unknown>;
+    return (json[fieldName] as string) ?? null;
+  } catch {
+    return null;
+  }
+}

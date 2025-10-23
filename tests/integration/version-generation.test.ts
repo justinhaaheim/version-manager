@@ -231,4 +231,64 @@ describe('Version Generation', () => {
       assertSemver(version.runtimeVersion);
     });
   });
+
+  describe('Uncommitted version changes', () => {
+    test('treats uncommitted version bump as 0 commits (add-to-patch mode)', () => {
+      // Set up repo with 5 commits after initial version
+      setupRepoWithCommitsAfterConfig(
+        repo,
+        5,
+        '0.1.0',
+        '0.1.0',
+        'add-to-patch',
+      );
+
+      // Now modify package.json version in working tree (uncommitted)
+      const packageJson = JSON.parse(repo.readFile('package.json'));
+      packageJson.version = '0.2.0';
+      repo.writeFile('package.json', JSON.stringify(packageJson, null, 2));
+
+      const result = repo.runCli('--silent');
+      expect(result.exitCode).toBe(0);
+
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
+      assertValidVersionJson(version);
+
+      // Should use the new version with 0 commits (not 0.2.5 from 5 commits)
+      expect(version.baseVersion).toBe('0.2.0');
+      expect(version.dynamicVersion).toBe('0.2.0');
+      expect(version.dirty).toBe(true);
+    });
+
+    test('treats uncommitted version bump as 0 commits (append-commits mode)', () => {
+      // Set up repo with 5 commits after initial version
+      setupRepoWithCommitsAfterConfig(
+        repo,
+        5,
+        '0.1.0',
+        '0.1.0',
+        'append-commits',
+      );
+
+      // Now modify package.json version in working tree (uncommitted)
+      const packageJson = JSON.parse(repo.readFile('package.json'));
+      packageJson.version = '0.2.0';
+      repo.writeFile('package.json', JSON.stringify(packageJson, null, 2));
+
+      const result = repo.runCli('--silent');
+      expect(result.exitCode).toBe(0);
+
+      const version: unknown = JSON.parse(
+        repo.readFile('dynamic-version.local.json'),
+      );
+      assertValidVersionJson(version);
+
+      // Should use the new version with 0 commits (not 0.2.0+5)
+      expect(version.baseVersion).toBe('0.2.0');
+      expect(version.dynamicVersion).toBe('0.2.0');
+      expect(version.dirty).toBe(true);
+    });
+  });
 });

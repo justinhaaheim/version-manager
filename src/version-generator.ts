@@ -16,6 +16,7 @@ import {
   getCurrentBranch,
   getGitDescribe,
   isGitRepository,
+  readFieldFromCommit,
 } from './git-utils';
 import {getPackageVersion} from './script-manager';
 import {VersionManagerConfigSchema} from './types';
@@ -315,9 +316,25 @@ export async function generateFileBasedVersion(
   );
 
   // Count commits since last change
-  const commitsSince = lastCommit
+  let commitsSince = lastCommit
     ? await countCommitsBetween(lastCommit, 'HEAD')
     : 0;
+
+  // Check if version has changed in working tree (uncommitted)
+  // If current version differs from last committed version, treat as 0 commits
+  if (lastCommit) {
+    const committedVersion = await readFieldFromCommit(
+      lastCommit,
+      'package.json',
+      'version',
+    );
+
+    if (committedVersion && committedVersion !== baseVersion) {
+      // Version changed in working tree (uncommitted bump)
+      // Treat this as the new base with 0 commits on top
+      commitsSince = 0;
+    }
+  }
 
   // Calculate dynamic version
   const dynamicVersion = calculateCodeVersion(
