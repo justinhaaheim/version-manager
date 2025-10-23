@@ -16,8 +16,8 @@ import {TestRepo} from '../helpers/test-repo';
 /**
  * Integration tests for version generation functionality
  *
- * Key concept: The tool tracks commits since codeVersionBase was last
- * changed in the COMMITTED version-manager.json file (not git tags).
+ * Key concept: The tool tracks commits since the package.json version was last
+ * changed (not git tags). The package.json is the source of truth for the base version.
  */
 describe('Version Generation', () => {
   let repo: TestRepo;
@@ -43,7 +43,7 @@ describe('Version Generation', () => {
         repo.readFile('dynamic-version.local.json'),
       );
       assertValidVersionJson(version);
-      expect(version.codeVersion).toBe('0.1.0');
+      expect(version.dynamicVersion).toBe('0.1.0');
       expect(version.runtimeVersion).toBe('0.1.0');
     });
   });
@@ -59,7 +59,7 @@ describe('Version Generation', () => {
         repo.readFile('dynamic-version.local.json'),
       );
       assertValidVersionJson(version);
-      expect(version.codeVersion).toBe('0.1.0');
+      expect(version.dynamicVersion).toBe('0.1.0');
       expect(version.runtimeVersion).toBe('0.1.0');
     });
 
@@ -81,7 +81,7 @@ describe('Version Generation', () => {
       assertValidVersionJson(version);
 
       // With add-to-patch mode, 5 commits after base 0.1.0 → 0.1.5
-      assertAddToPatchFormat(version.codeVersion, '0.1.0', 5);
+      assertAddToPatchFormat(version.dynamicVersion, '0.1.0', 5);
       expect(version.runtimeVersion).toBe('0.1.0');
     });
 
@@ -103,7 +103,7 @@ describe('Version Generation', () => {
       assertValidVersionJson(version);
 
       // 5 commits after 1.2.3 → 1.2.8
-      assertAddToPatchFormat(version.codeVersion, '1.2.3', 5);
+      assertAddToPatchFormat(version.dynamicVersion, '1.2.3', 5);
       expect(version.runtimeVersion).toBe('1.0.0');
     });
   });
@@ -127,7 +127,7 @@ describe('Version Generation', () => {
       assertValidVersionJson(version);
 
       // With append-commits mode, 5 commits after 0.1.0 → 0.1.0+5
-      assertAppendCommitsFormat(version.codeVersion, '0.1.0', 5);
+      assertAppendCommitsFormat(version.dynamicVersion, '0.1.0', 5);
       expect(version.runtimeVersion).toBe('0.1.0');
     });
 
@@ -141,43 +141,14 @@ describe('Version Generation', () => {
         repo.readFile('dynamic-version.local.json'),
       );
       assertValidVersionJson(version);
-      assertAppendCommitsFormat(version.codeVersion, '0.1.0', 0);
+      assertAppendCommitsFormat(version.dynamicVersion, '0.1.0', 0);
       expect(version.runtimeVersion).toBe('0.1.0');
     });
   });
 
-  describe('Build number from environment', () => {
-    test('includes BUILD_NUMBER from env variable', () => {
+  describe('Build number generation', () => {
+    test('always generates a build number in iOS-compatible format', () => {
       setupRepoWithVersionConfig(repo);
-
-      // Set environment variable before running CLI
-      const originalEnv = process.env.BUILD_NUMBER;
-      process.env.BUILD_NUMBER = '42';
-
-      try {
-        const result = repo.runCli('--silent');
-        expect(result.exitCode).toBe(0);
-
-        const version: unknown = JSON.parse(
-          repo.readFile('dynamic-version.local.json'),
-        );
-        assertValidVersionJson(version);
-        expect(version.buildNumber).toBe('42');
-      } finally {
-        // Restore original env
-        if (originalEnv !== undefined) {
-          process.env.BUILD_NUMBER = originalEnv;
-        } else {
-          delete process.env.BUILD_NUMBER;
-        }
-      }
-    });
-
-    test('omits buildNumber when env variable not set', () => {
-      setupRepoWithVersionConfig(repo);
-
-      // Ensure BUILD_NUMBER is not set
-      delete process.env.BUILD_NUMBER;
 
       const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
@@ -186,7 +157,13 @@ describe('Version Generation', () => {
         repo.readFile('dynamic-version.local.json'),
       );
       assertValidVersionJson(version);
-      expect(version.buildNumber).toBeUndefined();
+
+      // Build number should always be present
+      expect(version.buildNumber).toBeDefined();
+      expect(typeof version.buildNumber).toBe('string');
+
+      // Should match iOS-compatible format: YYYYMMDD.HHmmss.SS
+      expect(version.buildNumber).toMatch(/^\d{8}\.\d{6}\.\d{2}$/);
     });
   });
 
@@ -224,7 +201,7 @@ describe('Version Generation', () => {
       assertValidVersionJson(version);
 
       // Code version changes with commits, but runtime stays at config value
-      expect(version.codeVersion).toBe('0.1.5');
+      expect(version.dynamicVersion).toBe('0.1.5');
       expect(version.runtimeVersion).toBe('0.1.0');
     });
   });
@@ -242,7 +219,7 @@ describe('Version Generation', () => {
       assertValidVersionJson(version);
 
       // Should be valid semver format
-      assertSemver(version.codeVersion);
+      assertSemver(version.dynamicVersion);
       assertSemver(version.runtimeVersion);
     });
   });

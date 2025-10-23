@@ -310,24 +310,24 @@ describe('Git Hooks Installation', () => {
     test('warns when multiple version-manager commands found', () => {
       setupBasicRepo(repo);
 
-      // Add .gitignore and version-manager.json to avoid prompts
+      // Add .gitignore, package.json, and version-manager.json to avoid prompts
       repo.writeFile('.gitignore', '*.local.json\n');
+
+      repo.writeFile(
+        'package.json',
+        JSON.stringify({name: 'test-project', version: '0.1.0'}, null, 2),
+      );
+
       repo.writeFile(
         'version-manager.json',
         JSON.stringify(
           {
-            codeVersionBase: '0.1.0',
             runtimeVersion: '0.1.0',
             versionCalculationMode: 'add-to-patch',
           },
           null,
           2,
         ),
-      );
-
-      repo.writeFile(
-        'package.json',
-        JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
       // First installation
@@ -391,7 +391,7 @@ describe('Git Hooks Installation', () => {
         repo.readFile('dynamic-version.local.json'),
       );
       assertValidVersionJson(version);
-      expect(version.codeVersion).toBeDefined();
+      expect(version.dynamicVersion).toBeDefined();
       expect(version.runtimeVersion).toBe('0.1.0');
     });
   });
@@ -400,20 +400,8 @@ describe('Git Hooks Installation', () => {
     test('adds scripts to package.json', () => {
       setupBasicRepo(repo);
 
-      // Add .gitignore and version-manager.json to avoid prompts
+      // Add .gitignore, package.json, and version-manager.json to avoid prompts
       repo.writeFile('.gitignore', '*.local.json\n');
-      repo.writeFile(
-        'version-manager.json',
-        JSON.stringify(
-          {
-            codeVersionBase: '0.1.0',
-            runtimeVersion: '0.1.0',
-            versionCalculationMode: 'add-to-patch',
-          },
-          null,
-          2,
-        ),
-      );
 
       repo.writeFile(
         'package.json',
@@ -421,7 +409,19 @@ describe('Git Hooks Installation', () => {
           {
             name: 'test-project',
             scripts: {},
-            version: '1.0.0',
+            version: '0.1.0',
+          },
+          null,
+          2,
+        ),
+      );
+
+      repo.writeFile(
+        'version-manager.json',
+        JSON.stringify(
+          {
+            runtimeVersion: '0.1.0',
+            versionCalculationMode: 'add-to-patch',
           },
           null,
           2,
@@ -450,20 +450,8 @@ describe('Git Hooks Installation', () => {
     test('preserves existing scripts in package.json', () => {
       setupBasicRepo(repo);
 
-      // Add .gitignore and version-manager.json to avoid prompts
+      // Add .gitignore, package.json, and version-manager.json to avoid prompts
       repo.writeFile('.gitignore', '*.local.json\n');
-      repo.writeFile(
-        'version-manager.json',
-        JSON.stringify(
-          {
-            codeVersionBase: '0.1.0',
-            runtimeVersion: '0.1.0',
-            versionCalculationMode: 'add-to-patch',
-          },
-          null,
-          2,
-        ),
-      );
 
       repo.writeFile(
         'package.json',
@@ -474,7 +462,19 @@ describe('Git Hooks Installation', () => {
               build: 'tsc',
               test: 'bun test',
             },
-            version: '1.0.0',
+            version: '0.1.0',
+          },
+          null,
+          2,
+        ),
+      );
+
+      repo.writeFile(
+        'version-manager.json',
+        JSON.stringify(
+          {
+            runtimeVersion: '0.1.0',
+            versionCalculationMode: 'add-to-patch',
           },
           null,
           2,

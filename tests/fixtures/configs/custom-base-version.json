@@ -1,5 +1,4 @@
 {
-  "codeVersionBase": "1.2.3",
   "runtimeVersion": "1.0.0",
   "versionCalculationMode": "add-to-patch"
 }

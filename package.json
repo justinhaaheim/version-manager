@@ -98,7 +98,7 @@
   },
   "lint-staged": {
     "**/*": "prettier --check --ignore-unknown",
-    "*.(js|jsx|cjs|ts|tsx)": [
+    "src/**/*.(js|jsx|cjs|ts|tsx)": [
       "eslint --cache --max-warnings=0 --no-warn-ignored"
     ]
   }
