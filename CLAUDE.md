@@ -150,9 +150,12 @@ docs/
 - `isGitRepository()`: Check if cwd is a git repo
 - `getGitDescribe()`: Run git describe command
 - `getCurrentBranch()`: Get current branch name
+- `hasUncommittedChanges()`: Check for uncommitted changes
 - `findLastCommitWhereFieldChanged()`: Find commit where a JSON field value changed
 - `countCommitsBetween()`: Count commits between two refs
-- All functions use `execSync` with proper error handling
+- `readFieldFromCommit()`: Read a field value from a JSON file at a specific commit
+- `execCommand()`: Helper to run git commands with async/await
+- All functions use `execAsync` (promisified exec) with proper error handling
 
 **git-hooks-manager.ts** (Hook Management)
 - `installGitHooks()`: Install/update hooks for post-commit, post-checkout, post-merge, post-rewrite
@@ -188,10 +191,11 @@ docs/
 2. Read `version-manager.json` for `versionCalculationMode` and `runtimeVersion`
 3. Find last commit where `package.json` version field **value** changed (not just file modification)
 4. Count commits from that point to HEAD
-5. Calculate dynamic version based on mode:
+5. **Detect uncommitted version changes**: If the working tree version differs from the version at the last commit where it changed, treat as 0 commits (prevents showing `0.2.0+20` after bumping to `0.2.0` but before committing)
+6. Calculate dynamic version based on mode:
    - `add-to-patch`: Parse semver, add commits to patch number
    - `append-commits`: Append commits as metadata (+N)
-6. Generate build number automatically in iOS-compatible timestamp format
+7. Generate build number automatically in iOS-compatible timestamp format
 
 ### Git Hook Management
 
