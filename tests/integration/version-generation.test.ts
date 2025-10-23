@@ -34,6 +34,13 @@ describe('Version Generation', () => {
     test('generates default version for repo without version-manager.json', () => {
       setupBasicRepo(repo);
 
+      // Add package.json (now required)
+      repo.writeFile(
+        'package.json',
+        JSON.stringify({name: 'test-package', version: '0.1.0'}, null, 2),
+      );
+      repo.makeCommit('Add package.json');
+
       const result = repo.runCli('--silent');
       expect(result.exitCode).toBe(0);
 
@@ -43,6 +50,7 @@ describe('Version Generation', () => {
         repo.readFile('dynamic-version.local.json'),
       );
       assertValidVersionJson(version);
+      expect(version.baseVersion).toBe('0.1.0');
       expect(version.dynamicVersion).toBe('0.1.0');
       expect(version.runtimeVersion).toBe('0.1.0');
     });
