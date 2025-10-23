@@ -4,6 +4,7 @@ import {join} from 'path';
 interface PackageJson {
   [key: string]: unknown;
   scripts?: Record<string, string>;
+  version?: string;
 }
 
 interface ScriptEntry {
@@ -196,4 +197,34 @@ export function listDefaultScripts(includeLifecycleScripts = true): void {
       console.log(`    # ${script.description}`);
     }
   }
+}
+
+/**
+ * Get the version from package.json
+ * @returns The version string or null if not found
+ */
+export function getPackageVersion(): string | null {
+  const packageJson = readPackageJson();
+
+  if (!packageJson?.version) {
+    return null;
+  }
+
+  return packageJson.version;
+}
+
+/**
+ * Update the version in package.json
+ * @param newVersion - The new version string
+ * @returns True if successful, false otherwise
+ */
+export function updatePackageVersion(newVersion: string): boolean {
+  const packageJson = readPackageJson();
+
+  if (!packageJson) {
+    return false;
+  }
+
+  packageJson.version = newVersion;
+  return writePackageJson(packageJson);
 }

@@ -94,6 +94,15 @@ async function generateVersionFile(
     }
   }
 
+  // Check that package.json exists (required)
+  const packageJsonPath = join(process.cwd(), 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    console.error(
+      '❌ No package.json found. This tool requires a package.json with a "version" field.',
+    );
+    process.exit(1);
+  }
+
   // Check if version-manager.json exists
   const versionManagerPath = join(process.cwd(), 'version-manager.json');
   if (!existsSync(versionManagerPath) && !silent) {
@@ -105,11 +114,14 @@ async function generateVersionFile(
     if (shouldCreate) {
       createDefaultVersionManagerConfig(versionManagerPath, silent);
       console.log(
-        '\n   💡 Tip: Commit version-manager.json to track your base versions.',
+        '\n   💡 Tip: The version from package.json will be used as the base version.',
+      );
+      console.log(
+        '        Commit both package.json and version-manager.json to git.',
       );
     } else {
       console.log(
-        '   ℹ️  Continuing without version-manager.json. Using default version 0.1.0.',
+        '   ℹ️  Continuing without version-manager.json. Using package.json version with default settings.',
       );
     }
   }
@@ -290,7 +302,11 @@ async function bumpCommand(
 Co-Authored-By: Claude <noreply@anthropic.com>`;
 
     try {
-      execSync('git add version-manager.json', {stdio: 'pipe'});
+      // Stage package.json (always) and version-manager.json (if runtime was updated)
+      execSync('git add package.json', {stdio: 'pipe'});
+      if (updateRuntime) {
+        execSync('git add version-manager.json', {stdio: 'pipe'});
+      }
       execSync(`git commit -m '${commitMessage.replace(/'/g, "'\\''")}'`, {
         stdio: 'pipe',
       });

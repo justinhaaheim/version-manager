@@ -17,6 +17,7 @@ import {
   getGitDescribe,
   isGitRepository,
 } from './git-utils';
+import {getPackageVersion} from './script-manager';
 import {VersionManagerConfigSchema} from './types';
 
 function parseGitDescribe(describe: string): VersionComponents | null {
@@ -222,7 +223,6 @@ export function createDefaultVersionManagerConfig(
   silent = false,
 ): void {
   const defaultConfig: VersionManagerConfig = {
-    codeVersionBase: '0.1.0',
     runtimeVersion: '0.1.0',
     versionCalculationMode: 'add-to-patch',
   };
@@ -231,7 +231,6 @@ export function createDefaultVersionManagerConfig(
 
   if (!silent) {
     console.log('✅ Created version-manager.json with default values:');
-    console.log(`   codeVersionBase: ${defaultConfig.codeVersionBase}`);
     console.log(`   runtimeVersion: ${defaultConfig.runtimeVersion}`);
     console.log(
       `   versionCalculationMode: ${defaultConfig.versionCalculationMode}`,
@@ -284,26 +283,34 @@ export async function generateFileBasedVersion(
   const gitDescribe = await getGitDescribe();
   const dirty = gitDescribe.includes('-dirty');
 
+  // Read base version from package.json
+  const baseVersion = getPackageVersion();
+  if (!baseVersion) {
+    throw new Error(
+      'No version found in package.json. Please add a "version" field to your package.json.',
+    );
+  }
+
   // Read config (will be null if doesn't exist)
   const config = readVersionManagerConfig(configPath);
 
   if (!config) {
-    // Return default version if config doesn't exist
+    // Return default version if config doesn't exist (using package.json version)
     return {
       branch,
       buildNumber: generateBuildNumber(),
-      codeVersion: '0.1.0',
+      codeVersion: baseVersion,
       dirty,
       generationTrigger,
-      runtimeVersion: '0.1.0',
+      runtimeVersion: baseVersion,
       timestamp: new Date().toISOString(),
     };
   }
 
-  // Find last commit where codeVersionBase changed
+  // Find last commit where package.json version changed
   const lastCommit = await findLastCommitWhereFieldChanged(
-    'version-manager.json',
-    'codeVersionBase',
+    'package.json',
+    'version',
   );
 
   // Count commits since last change
@@ -313,7 +320,7 @@ export async function generateFileBasedVersion(
 
   // Calculate code version
   const codeVersion = calculateCodeVersion(
-    config.codeVersionBase,
+    baseVersion,
     commitsSince,
     config.versionCalculationMode,
   );
@@ -401,7 +408,7 @@ function incrementVersion(version: string, bumpType: BumpType): string | null {
 }
 
 /**
- * Bump the version in version-manager.json
+ * Bump the version in package.json
  * @param bumpType - Type of bump (major, minor, patch)
  * @param updateRuntime - Whether to also update runtimeVersion to match
  * @param silent - Suppress console output
@@ -422,11 +429,11 @@ export async function bumpVersion(
     );
   }
 
-  // Read current config
-  const config = readVersionManagerConfig(configPath);
-  if (!config) {
+  // Check that package.json exists
+  const currentPackageVersion = getPackageVersion();
+  if (!currentPackageVersion) {
     throw new Error(
-      'version-manager.json not found. Run the install command first or create the file manually.',
+      'No version found in package.json. Please add a "version" field to your package.json.',
     );
   }
 
@@ -442,23 +449,31 @@ export async function bumpVersion(
     );
   }
 
-  // Update config
-  config.codeVersionBase = newVersion;
-  if (updateRuntime) {
-    config.runtimeVersion = newVersion;
+  // Update package.json version
+  const {updatePackageVersion} = await import('./script-manager');
+  const packageUpdateSuccess = updatePackageVersion(newVersion);
+  if (!packageUpdateSuccess) {
+    throw new Error('Failed to update package.json');
   }
 
-  // Write updated config
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+  // Update runtime version in config if requested
+  if (updateRuntime) {
+    const config = readVersionManagerConfig(configPath);
+    if (config) {
+      config.runtimeVersion = newVersion;
+      writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    }
+  }
 
   if (!silent) {
     console.log('📈 Bumping version...');
     console.log(`   Current: ${oldVersion}`);
-    console.log(`   New base: ${newVersion}`);
+    console.log(`   New: ${newVersion}`);
+    console.log('✅ Updated package.json');
     if (updateRuntime) {
       console.log(`   Runtime version: ${newVersion}`);
+      console.log('✅ Updated version-manager.json');
     }
-    console.log('✅ Updated version-manager.json');
   }
 
   return {

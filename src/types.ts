@@ -31,7 +31,6 @@ export const VersionCalculationModeSchema = z.enum([
 ]);
 
 export const VersionManagerConfigSchema = z.object({
-  codeVersionBase: z.string(),
   runtimeVersion: z.string(),
   versionCalculationMode: VersionCalculationModeSchema,
 });
