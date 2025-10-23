@@ -65,6 +65,12 @@ const globalOptions = {
         describe: 'Exit with error code on failures (use --no-fail to always exit 0)',
         type: 'boolean',
     },
+    'git-hook': {
+        default: false,
+        describe: 'Triggered by git hook (internal use)',
+        hidden: true,
+        type: 'boolean',
+    },
     output: {
         alias: 'o',
         default: './dynamic-version.local.json',
@@ -79,7 +85,7 @@ const globalOptions = {
     },
 };
 // Generate version file command
-async function generateVersionFile(outputPath, silent) {
+async function generateVersionFile(outputPath, silent, gitHook = false) {
     // Check if .local.json is in .gitignore
     const gitignoreOk = (0, git_hooks_manager_1.checkGitignore)();
     if (!gitignoreOk && !silent) {
@@ -111,7 +117,7 @@ async function generateVersionFile(outputPath, silent) {
         }
     }
     // Generate version info using file-based approach
-    const versionInfo = await (0, version_generator_1.generateFileBasedVersion)();
+    const versionInfo = await (0, version_generator_1.generateFileBasedVersion)(gitHook ? 'git-hook' : 'cli');
     // Write to dynamic-version.local.json
     const finalOutputPath = outputPath ?? (0, path_1.join)(process.cwd(), 'dynamic-version.local.json');
     (0, fs_1.writeFileSync)(finalOutputPath, JSON.stringify(versionInfo, null, 2) + '\n');
@@ -126,9 +132,9 @@ async function generateVersionFile(outputPath, silent) {
     }
 }
 // Install command handler
-async function installCommand(incrementPatch, outputPath, silent, noFail) {
+async function installCommand(incrementPatch, outputPath, silent, noFail, gitHook = false) {
     // First, generate the version file
-    await generateVersionFile(outputPath, silent);
+    await generateVersionFile(outputPath, silent, gitHook);
     if (!silent) {
         console.log('\n📦 Installing git hooks...');
     }
@@ -218,14 +224,14 @@ async function installScriptsCommand() {
     }
 }
 // Bump version command handler
-async function bumpCommand(bumpType, updateRuntime, silent, commit, message) {
+async function bumpCommand(bumpType, updateRuntime, silent, commit, tag, push, message, gitHook = false) {
     // Bump the version
     const result = await (0, version_generator_1.bumpVersion)(bumpType, updateRuntime, silent);
     // Regenerate dynamic version file
     if (!silent) {
         console.log('📝 Regenerating dynamic-version.local.json...');
     }
-    await generateVersionFile('./dynamic-version.local.json', silent);
+    await generateVersionFile('./dynamic-version.local.json', silent, gitHook);
     // Optionally commit
     if (commit) {
         if (!silent) {
@@ -246,6 +252,52 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
             if (!silent) {
                 console.log('✅ Changes committed');
             }
+            // Optionally create git tag
+            if (tag) {
+                if (!silent) {
+                    console.log(`🏷️  Creating git tag v${result.newVersion}...`);
+                }
+                const tagMessage = `Version ${result.newVersion}`;
+                try {
+                    execSync(`git tag -a v${result.newVersion} -m '${tagMessage.replace(/'/g, "'\\''")}'`, { stdio: 'pipe' });
+                    if (!silent) {
+                        console.log(`✅ Tag v${result.newVersion} created`);
+                    }
+                }
+                catch (error) {
+                    if (!silent) {
+                        console.error('❌ Failed to create tag:', error);
+                    }
+                    throw error;
+                }
+            }
+            // Optionally push to remote
+            if (push) {
+                if (!silent) {
+                    console.log('🚀 Pushing to remote...');
+                }
+                try {
+                    // Push commits and tags together
+                    if (tag) {
+                        execSync('git push --follow-tags', { stdio: 'pipe' });
+                        if (!silent) {
+                            console.log('✅ Pushed commit and tag to remote');
+                        }
+                    }
+                    else {
+                        execSync('git push', { stdio: 'pipe' });
+                        if (!silent) {
+                            console.log('✅ Pushed commit to remote');
+                        }
+                    }
+                }
+                catch (error) {
+                    if (!silent) {
+                        console.error('❌ Failed to push:', error);
+                    }
+                    throw error;
+                }
+            }
         }
         catch (error) {
             if (!silent) {
@@ -255,9 +307,14 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
         }
     }
     else if (!silent) {
-        console.log('\n💡 Tip: Commit this change with: git add version-manager.json && git commit -m "Bump version to ' +
-            result.newVersion +
-            '"');
+        let tip = `\n💡 Tip: Commit this change with: git add version-manager.json && git commit -m "Bump version to ${result.newVersion}"`;
+        if (tag && !commit) {
+            tip += `\n💡 Note: --tag requires --commit to create a git tag`;
+        }
+        if (push && !commit) {
+            tip += `\n💡 Note: --push requires --commit to push changes`;
+        }
+        console.log(tip);
     }
 }
 async function main() {
@@ -266,7 +323,7 @@ async function main() {
             .scriptName('npx @justinhaaheim/version-manager')
             .usage('$0 [command]')
             .command('$0', 'Generate version file', (yargsInstance) => yargsInstance.options(globalOptions), async (args) => {
-            await generateVersionFile(args.output, args.silent);
+            await generateVersionFile(args.output, args.silent, args['git-hook']);
         })
             .command('install', 'Install git hooks and scripts', (yargsInstance) => yargsInstance.options({
             ...globalOptions,
@@ -276,7 +333,7 @@ async function main() {
                 type: 'boolean',
             },
         }), async (args) => {
-            await installCommand(args['increment-patch'], args.output, args.silent, !args.fail);
+            await installCommand(args['increment-patch'], args.output, args.silent, !args.fail, args['git-hook']);
         })
             .command('install-scripts', 'Add/update dynamic-version scripts in package.json', (yargsInstance) => yargsInstance.options(globalOptions), async () => {
             await installScriptsCommand();
@@ -309,10 +366,22 @@ async function main() {
                 describe: 'Bump patch version (e.g., 1.2.3 -> 1.2.4)',
                 type: 'boolean',
             },
+            push: {
+                alias: 'p',
+                default: false,
+                describe: 'Push commit and tag to remote (requires --commit)',
+                type: 'boolean',
+            },
             runtime: {
                 alias: 'r',
                 default: false,
                 describe: 'Also update runtimeVersion to match',
+                type: 'boolean',
+            },
+            tag: {
+                alias: 't',
+                default: false,
+                describe: 'Create git tag (requires --commit)',
                 type: 'boolean',
             },
         }), async (args) => {
@@ -329,7 +398,7 @@ async function main() {
             else if (args.minor) {
                 bumpType = 'minor';
             }
-            await bumpCommand(bumpType, args.runtime, args.silent, args.commit, args.message);
+            await bumpCommand(bumpType, args.runtime, args.silent, args.commit, args.tag, args.push, args.message, args['git-hook']);
         })
             .help()
             .alias('help', 'h')

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DynamicVersionSchema = exports.VersionManagerConfigSchema = exports.VersionCalculationModeSchema = exports.GenerateVersionOptionsSchema = exports.VersionInfoSchema = exports.VersionComponentsSchema = void 0;
+exports.DynamicVersionSchema = exports.GenerationTriggerSchema = exports.VersionManagerConfigSchema = exports.VersionCalculationModeSchema = exports.GenerateVersionOptionsSchema = exports.VersionInfoSchema = exports.VersionComponentsSchema = void 0;
 const zod_1 = require("zod");
 // Zod schemas for runtime validation
 exports.VersionComponentsSchema = zod_1.z.object({
@@ -33,9 +33,14 @@ exports.VersionManagerConfigSchema = zod_1.z.object({
     runtimeVersion: zod_1.z.string(),
     versionCalculationMode: exports.VersionCalculationModeSchema,
 });
+exports.GenerationTriggerSchema = zod_1.z.enum(['git-hook', 'cli']);
 exports.DynamicVersionSchema = zod_1.z.object({
-    buildNumber: zod_1.z.string().optional(),
+    branch: zod_1.z.string(),
+    buildNumber: zod_1.z.string(),
     codeVersion: zod_1.z.string(),
+    dirty: zod_1.z.boolean(),
+    generationTrigger: exports.GenerationTriggerSchema,
     runtimeVersion: zod_1.z.string(),
+    timestamp: zod_1.z.string(),
 });
 //# sourceMappingURL=types.js.map

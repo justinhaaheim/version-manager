@@ -177,23 +177,52 @@ function createDefaultVersionManagerConfig(configPath, silent = false) {
     }
 }
 /**
+ * Generate a build number in iOS-compatible format
+ * Format: YYYYMMDD.HHmmss.SS (18 characters max)
+ * Example: 20251020.143245.67
+ * @returns Build number string
+ */
+function generateBuildNumber() {
+    const now = new Date();
+    const year = now.getFullYear().toString();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const seconds = now.getSeconds().toString().padStart(2, '0');
+    const hundredths = Math.floor(now.getMilliseconds() / 10)
+        .toString()
+        .padStart(2, '0');
+    return `${year}${month}${day}.${hours}${minutes}${seconds}.${hundredths}`;
+}
+/**
  * Generate dynamic version using file-based approach
+ * @param generationTrigger - What triggered the version generation
  * @returns DynamicVersion object
  */
-async function generateFileBasedVersion() {
+async function generateFileBasedVersion(generationTrigger = 'cli') {
     const configPath = (0, path_1.join)(process.cwd(), 'version-manager.json');
     // Check if in git repository
     const isRepo = await (0, git_utils_1.isGitRepository)();
     if (!isRepo) {
         throw new Error('Not a git repository. Please run this command in a git project.');
     }
+    // Get git branch and dirty status
+    const branch = await (0, git_utils_1.getCurrentBranch)();
+    const gitDescribe = await (0, git_utils_1.getGitDescribe)();
+    const dirty = gitDescribe.includes('-dirty');
     // Read config (will be null if doesn't exist)
     const config = readVersionManagerConfig(configPath);
     if (!config) {
         // Return default version if config doesn't exist
         return {
+            branch,
+            buildNumber: generateBuildNumber(),
             codeVersion: '0.1.0',
+            dirty,
+            generationTrigger,
             runtimeVersion: '0.1.0',
+            timestamp: new Date().toISOString(),
         };
     }
     // Find last commit where codeVersionBase changed
@@ -206,13 +235,14 @@ async function generateFileBasedVersion() {
     const codeVersion = calculateCodeVersion(config.codeVersionBase, commitsSince, config.versionCalculationMode);
     // Build result
     const result = {
+        branch,
+        buildNumber: generateBuildNumber(),
         codeVersion,
+        dirty,
+        generationTrigger,
         runtimeVersion: config.runtimeVersion,
+        timestamp: new Date().toISOString(),
     };
-    // Add BUILD_NUMBER from environment if present
-    if (process.env.BUILD_NUMBER) {
-        result.buildNumber = process.env.BUILD_NUMBER;
-    }
     return result;
 }
 /**

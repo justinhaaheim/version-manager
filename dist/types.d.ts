@@ -35,15 +35,27 @@ export declare const VersionManagerConfigSchema: z.ZodObject<{
         "append-commits": "append-commits";
     }>;
 }, z.core.$strip>;
+export declare const GenerationTriggerSchema: z.ZodEnum<{
+    "git-hook": "git-hook";
+    cli: "cli";
+}>;
 export declare const DynamicVersionSchema: z.ZodObject<{
-    buildNumber: z.ZodOptional<z.ZodString>;
+    branch: z.ZodString;
+    buildNumber: z.ZodString;
     codeVersion: z.ZodString;
+    dirty: z.ZodBoolean;
+    generationTrigger: z.ZodEnum<{
+        "git-hook": "git-hook";
+        cli: "cli";
+    }>;
     runtimeVersion: z.ZodString;
+    timestamp: z.ZodString;
 }, z.core.$strip>;
 export type VersionComponents = z.infer<typeof VersionComponentsSchema>;
 export type VersionInfo = z.infer<typeof VersionInfoSchema>;
 export type GenerateVersionOptions = z.infer<typeof GenerateVersionOptionsSchema>;
 export type VersionCalculationMode = z.infer<typeof VersionCalculationModeSchema>;
 export type VersionManagerConfig = z.infer<typeof VersionManagerConfigSchema>;
+export type GenerationTrigger = z.infer<typeof GenerationTriggerSchema>;
 export type DynamicVersion = z.infer<typeof DynamicVersionSchema>;
 //# sourceMappingURL=types.d.ts.map

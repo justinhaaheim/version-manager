@@ -193,7 +193,8 @@ function installGitHooks(incrementPatch = false, silent = false, noFail = false)
     const incrementFlag = incrementPatch ? ' --increment-patch' : '';
     const silentFlag = silent ? ' --silent' : '';
     const noFailFlag = noFail ? ' --no-fail' : '';
-    const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}`;
+    const gitHookFlag = ' --git-hook';
+    const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}${gitHookFlag}`;
     for (const hookName of HOOK_NAMES) {
         const hookPath = (0, path_1.join)(huskyDir, hookName);
         if ((0, fs_1.existsSync)(hookPath)) {

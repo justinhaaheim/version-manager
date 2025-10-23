@@ -1,4 +1,4 @@
-import type { DynamicVersion, VersionInfo } from './types';
+import type { DynamicVersion, GenerationTrigger, VersionInfo } from './types';
 export declare function generateVersion(options?: {
     incrementPatch?: boolean;
 }): Promise<VersionInfo>;
@@ -10,9 +10,10 @@ export declare function generateVersion(options?: {
 export declare function createDefaultVersionManagerConfig(configPath: string, silent?: boolean): void;
 /**
  * Generate dynamic version using file-based approach
+ * @param generationTrigger - What triggered the version generation
  * @returns DynamicVersion object
  */
-export declare function generateFileBasedVersion(): Promise<DynamicVersion>;
+export declare function generateFileBasedVersion(generationTrigger?: GenerationTrigger): Promise<DynamicVersion>;
 /**
  * Bump version type
  */
