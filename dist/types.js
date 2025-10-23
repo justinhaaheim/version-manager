@@ -29,16 +29,16 @@ exports.VersionCalculationModeSchema = zod_1.z.enum([
     'append-commits',
 ]);
 exports.VersionManagerConfigSchema = zod_1.z.object({
-    codeVersionBase: zod_1.z.string(),
     runtimeVersion: zod_1.z.string(),
     versionCalculationMode: exports.VersionCalculationModeSchema,
 });
 exports.GenerationTriggerSchema = zod_1.z.enum(['git-hook', 'cli']);
 exports.DynamicVersionSchema = zod_1.z.object({
+    baseVersion: zod_1.z.string(),
     branch: zod_1.z.string(),
     buildNumber: zod_1.z.string(),
-    codeVersion: zod_1.z.string(),
     dirty: zod_1.z.boolean(),
+    dynamicVersion: zod_1.z.string(),
     generationTrigger: exports.GenerationTriggerSchema,
     runtimeVersion: zod_1.z.string(),
     timestamp: zod_1.z.string(),

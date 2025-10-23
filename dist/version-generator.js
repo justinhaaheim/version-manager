@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateVersion = generateVersion;
 exports.createDefaultVersionManagerConfig = createDefaultVersionManagerConfig;
@@ -7,6 +40,7 @@ exports.bumpVersion = bumpVersion;
 const fs_1 = require("fs");
 const path_1 = require("path");
 const git_utils_1 = require("./git-utils");
+const script_manager_1 = require("./script-manager");
 const types_1 = require("./types");
 function parseGitDescribe(describe) {
     const cleanDescribe = describe.replace('-dirty', '');
@@ -164,14 +198,12 @@ function calculateCodeVersion(baseVersion, commitsSince, mode) {
  */
 function createDefaultVersionManagerConfig(configPath, silent = false) {
     const defaultConfig = {
-        codeVersionBase: '0.1.0',
         runtimeVersion: '0.1.0',
         versionCalculationMode: 'add-to-patch',
     };
     (0, fs_1.writeFileSync)(configPath, JSON.stringify(defaultConfig, null, 2) + '\n');
     if (!silent) {
         console.log('✅ Created version-manager.json with default values:');
-        console.log(`   codeVersionBase: ${defaultConfig.codeVersionBase}`);
         console.log(`   runtimeVersion: ${defaultConfig.runtimeVersion}`);
         console.log(`   versionCalculationMode: ${defaultConfig.versionCalculationMode}`);
     }
@@ -211,34 +243,51 @@ async function generateFileBasedVersion(generationTrigger = 'cli') {
     const branch = await (0, git_utils_1.getCurrentBranch)();
     const gitDescribe = await (0, git_utils_1.getGitDescribe)();
     const dirty = gitDescribe.includes('-dirty');
+    // Read base version from package.json
+    const baseVersion = (0, script_manager_1.getPackageVersion)();
+    if (!baseVersion) {
+        throw new Error('No version found in package.json. Please add a "version" field to your package.json.');
+    }
     // Read config (will be null if doesn't exist)
     const config = readVersionManagerConfig(configPath);
     if (!config) {
-        // Return default version if config doesn't exist
+        // Return default version if config doesn't exist (using package.json version)
         return {
+            baseVersion,
             branch,
             buildNumber: generateBuildNumber(),
-            codeVersion: '0.1.0',
             dirty,
+            dynamicVersion: baseVersion,
             generationTrigger,
-            runtimeVersion: '0.1.0',
+            runtimeVersion: baseVersion,
             timestamp: new Date().toISOString(),
         };
     }
-    // Find last commit where codeVersionBase changed
-    const lastCommit = await (0, git_utils_1.findLastCommitWhereFieldChanged)('version-manager.json', 'codeVersionBase');
+    // Find last commit where package.json version changed
+    const lastCommit = await (0, git_utils_1.findLastCommitWhereFieldChanged)('package.json', 'version');
     // Count commits since last change
-    const commitsSince = lastCommit
+    let commitsSince = lastCommit
         ? await (0, git_utils_1.countCommitsBetween)(lastCommit, 'HEAD')
         : 0;
-    // Calculate code version
-    const codeVersion = calculateCodeVersion(config.codeVersionBase, commitsSince, config.versionCalculationMode);
+    // Check if version has changed in working tree (uncommitted)
+    // If current version differs from last committed version, treat as 0 commits
+    if (lastCommit) {
+        const committedVersion = await (0, git_utils_1.readFieldFromCommit)(lastCommit, 'package.json', 'version');
+        if (committedVersion && committedVersion !== baseVersion) {
+            // Version changed in working tree (uncommitted bump)
+            // Treat this as the new base with 0 commits on top
+            commitsSince = 0;
+        }
+    }
+    // Calculate dynamic version
+    const dynamicVersion = calculateCodeVersion(baseVersion, commitsSince, config.versionCalculationMode);
     // Build result
     const result = {
+        baseVersion,
         branch,
         buildNumber: generateBuildNumber(),
-        codeVersion,
         dirty,
+        dynamicVersion,
         generationTrigger,
         runtimeVersion: config.runtimeVersion,
         timestamp: new Date().toISOString(),
@@ -292,7 +341,7 @@ function incrementVersion(version, bumpType) {
     return `${major}.${minor}.${patch}`;
 }
 /**
- * Bump the version in version-manager.json
+ * Bump the version in package.json
  * @param bumpType - Type of bump (major, minor, patch)
  * @param updateRuntime - Whether to also update runtimeVersion to match
  * @param silent - Suppress console output
@@ -305,34 +354,42 @@ async function bumpVersion(bumpType, updateRuntime = false, silent = false) {
     if (!isRepo) {
         throw new Error('Not a git repository. Please run this command in a git project.');
     }
-    // Read current config
-    const config = readVersionManagerConfig(configPath);
-    if (!config) {
-        throw new Error('version-manager.json not found. Run the install command first or create the file manually.');
+    // Check that package.json exists
+    const currentPackageVersion = (0, script_manager_1.getPackageVersion)();
+    if (!currentPackageVersion) {
+        throw new Error('No version found in package.json. Please add a "version" field to your package.json.');
     }
     // Generate current computed version to show user what it was
     const currentDynamic = await generateFileBasedVersion();
-    const oldVersion = currentDynamic.codeVersion;
+    const oldVersion = currentDynamic.dynamicVersion;
     // Increment from the current computed version (not the base)
     const newVersion = incrementVersion(oldVersion, bumpType);
     if (!newVersion) {
         throw new Error(`Invalid version format: ${oldVersion}. Expected semver format (e.g., 1.2.3)`);
     }
-    // Update config
-    config.codeVersionBase = newVersion;
-    if (updateRuntime) {
-        config.runtimeVersion = newVersion;
+    // Update package.json version
+    const { updatePackageVersion } = await Promise.resolve().then(() => __importStar(require('./script-manager')));
+    const packageUpdateSuccess = updatePackageVersion(newVersion);
+    if (!packageUpdateSuccess) {
+        throw new Error('Failed to update package.json');
     }
-    // Write updated config
-    (0, fs_1.writeFileSync)(configPath, JSON.stringify(config, null, 2) + '\n');
+    // Update runtime version in config if requested
+    if (updateRuntime) {
+        const config = readVersionManagerConfig(configPath);
+        if (config) {
+            config.runtimeVersion = newVersion;
+            (0, fs_1.writeFileSync)(configPath, JSON.stringify(config, null, 2) + '\n');
+        }
+    }
     if (!silent) {
         console.log('📈 Bumping version...');
         console.log(`   Current: ${oldVersion}`);
-        console.log(`   New base: ${newVersion}`);
+        console.log(`   New: ${newVersion}`);
+        console.log('✅ Updated package.json');
         if (updateRuntime) {
             console.log(`   Runtime version: ${newVersion}`);
+            console.log('✅ Updated version-manager.json');
         }
-        console.log('✅ Updated version-manager.json');
     }
     return {
         newVersion,

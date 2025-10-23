@@ -12,14 +12,16 @@ export type { DynamicVersion, GenerationTrigger } from './types';
  * import { validateDynamicVersion } from '@justinhaaheim/version-manager';
  *
  * const version = validateDynamicVersion(rawVersion);
- * console.log(version.codeVersion); // e.g., "1.2.3"
+ * console.log(version.baseVersion);    // e.g., "1.2.3"
+ * console.log(version.dynamicVersion); // e.g., "1.2.3+5"
  * ```
  */
 export declare function validateDynamicVersion(version: unknown): {
+    baseVersion: string;
     branch: string;
     buildNumber: string;
-    codeVersion: string;
     dirty: boolean;
+    dynamicVersion: string;
     generationTrigger: "git-hook" | "cli";
     runtimeVersion: string;
     timestamp: string;

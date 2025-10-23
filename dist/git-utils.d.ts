@@ -17,4 +17,12 @@ export declare function findLastCommitWhereFieldChanged(filePath: string, fieldN
  * @returns Number of commits between the two refs
  */
 export declare function countCommitsBetween(fromRef: string, toRef: string): Promise<number>;
+/**
+ * Read a field value from a JSON file at a specific commit
+ * @param commit - Commit hash or ref
+ * @param filePath - Path to the JSON file (relative to repo root)
+ * @param fieldName - Name of the field to read
+ * @returns The field value, or null if not found
+ */
+export declare function readFieldFromCommit(commit: string, filePath: string, fieldName: string): Promise<string | null>;
 //# sourceMappingURL=git-utils.d.ts.map

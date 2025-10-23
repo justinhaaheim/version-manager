@@ -27,7 +27,7 @@ export interface BumpVersionResult {
     updatedRuntimeVersion: boolean;
 }
 /**
- * Bump the version in version-manager.json
+ * Bump the version in package.json
  * @param bumpType - Type of bump (major, minor, patch)
  * @param updateRuntime - Whether to also update runtimeVersion to match
  * @param silent - Suppress console output

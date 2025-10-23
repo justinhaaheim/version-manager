@@ -1,1 +1,1 @@
-{"version":3,"file":"reader.js","sourceRoot":"","sources":["../src/reader.ts"],"names":[],"mappings":";;AAqBA,wDAEC;AAvBD,mCAA6C;AAK7C;;;;;;;;;;;;;;;GAeG;AACH,SAAgB,sBAAsB,CAAC,OAAgB;IACrD,OAAO,4BAAoB,CAAC,KAAK,CAAC,OAAO,CAAC,CAAC;AAC7C,CAAC"}
+{"version":3,"file":"reader.js","sourceRoot":"","sources":["../src/reader.ts"],"names":[],"mappings":";;AAsBA,wDAEC;AAxBD,mCAA6C;AAK7C;;;;;;;;;;;;;;;;GAgBG;AACH,SAAgB,sBAAsB,CAAC,OAAgB;IACrD,OAAO,4BAAoB,CAAC,KAAK,CAAC,OAAO,CAAC,CAAC;AAC7C,CAAC"}

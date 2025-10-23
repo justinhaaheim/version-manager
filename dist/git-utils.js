@@ -7,6 +7,7 @@ exports.getCurrentBranch = getCurrentBranch;
 exports.hasUncommittedChanges = hasUncommittedChanges;
 exports.findLastCommitWhereFieldChanged = findLastCommitWhereFieldChanged;
 exports.countCommitsBetween = countCommitsBetween;
+exports.readFieldFromCommit = readFieldFromCommit;
 const child_process_1 = require("child_process");
 const util_1 = require("util");
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
@@ -123,6 +124,23 @@ async function countCommitsBetween(fromRef, toRef) {
     }
     catch {
         return 0;
+    }
+}
+/**
+ * Read a field value from a JSON file at a specific commit
+ * @param commit - Commit hash or ref
+ * @param filePath - Path to the JSON file (relative to repo root)
+ * @param fieldName - Name of the field to read
+ * @returns The field value, or null if not found
+ */
+async function readFieldFromCommit(commit, filePath, fieldName) {
+    try {
+        const content = await execCommand(`git show ${commit}:${filePath}`);
+        const json = JSON.parse(content);
+        return json[fieldName] ?? null;
+    }
+    catch {
+        return null;
     }
 }
 //# sourceMappingURL=git-utils.js.map

@@ -15,7 +15,8 @@ const types_1 = require("./types");
  * import { validateDynamicVersion } from '@justinhaaheim/version-manager';
  *
  * const version = validateDynamicVersion(rawVersion);
- * console.log(version.codeVersion); // e.g., "1.2.3"
+ * console.log(version.baseVersion);    // e.g., "1.2.3"
+ * console.log(version.dynamicVersion); // e.g., "1.2.3+5"
  * ```
  */
 function validateDynamicVersion(version) {

@@ -6,6 +6,8 @@ exports.readPackageJson = readPackageJson;
 exports.writePackageJson = writePackageJson;
 exports.addScriptsToPackageJson = addScriptsToPackageJson;
 exports.listDefaultScripts = listDefaultScripts;
+exports.getPackageVersion = getPackageVersion;
+exports.updatePackageVersion = updatePackageVersion;
 const fs_1 = require("fs");
 const path_1 = require("path");
 const DEFAULT_SCRIPTS = [
@@ -154,5 +156,29 @@ function listDefaultScripts(includeLifecycleScripts = true) {
             console.log(`    # ${script.description}`);
         }
     }
+}
+/**
+ * Get the version from package.json
+ * @returns The version string or null if not found
+ */
+function getPackageVersion() {
+    const packageJson = readPackageJson();
+    if (!packageJson?.version) {
+        return null;
+    }
+    return packageJson.version;
+}
+/**
+ * Update the version in package.json
+ * @param newVersion - The new version string
+ * @returns True if successful, false otherwise
+ */
+function updatePackageVersion(newVersion) {
+    const packageJson = readPackageJson();
+    if (!packageJson) {
+        return false;
+    }
+    packageJson.version = newVersion;
+    return writePackageJson(packageJson);
 }
 //# sourceMappingURL=script-manager.js.map

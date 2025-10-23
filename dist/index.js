@@ -103,6 +103,12 @@ async function generateVersionFile(outputPath, silent, gitHook = false) {
             console.log('⚠️  Continuing without gitignore update. Be careful not to commit dynamic-version.local.json!');
         }
     }
+    // Check that package.json exists (required)
+    const packageJsonPath = (0, path_1.join)(process.cwd(), 'package.json');
+    if (!(0, fs_1.existsSync)(packageJsonPath)) {
+        console.error('❌ No package.json found. This tool requires a package.json with a "version" field.');
+        process.exit(1);
+    }
     // Check if version-manager.json exists
     const versionManagerPath = (0, path_1.join)(process.cwd(), 'version-manager.json');
     if (!(0, fs_1.existsSync)(versionManagerPath) && !silent) {
@@ -110,10 +116,11 @@ async function generateVersionFile(outputPath, silent, gitHook = false) {
         const shouldCreate = await promptUser('Would you like to create it with default values? (y/n): ');
         if (shouldCreate) {
             (0, version_generator_1.createDefaultVersionManagerConfig)(versionManagerPath, silent);
-            console.log('\n   💡 Tip: Commit version-manager.json to track your base versions.');
+            console.log('\n   💡 Tip: The version from package.json will be used as the base version.');
+            console.log('        Commit both package.json and version-manager.json to git.');
         }
         else {
-            console.log('   ℹ️  Continuing without version-manager.json. Using default version 0.1.0.');
+            console.log('   ℹ️  Continuing without version-manager.json. Using package.json version with default settings.');
         }
     }
     // Generate version info using file-based approach
@@ -123,7 +130,8 @@ async function generateVersionFile(outputPath, silent, gitHook = false) {
     (0, fs_1.writeFileSync)(finalOutputPath, JSON.stringify(versionInfo, null, 2) + '\n');
     if (!silent) {
         console.log(`✅ Version generated:`);
-        console.log(`   Code version: ${versionInfo.codeVersion}`);
+        console.log(`   Base version: ${versionInfo.baseVersion}`);
+        console.log(`   Dynamic version: ${versionInfo.dynamicVersion}`);
         console.log(`   Runtime version: ${versionInfo.runtimeVersion}`);
         if (versionInfo.buildNumber) {
             console.log(`   Build number: ${versionInfo.buildNumber}`);
@@ -245,7 +253,11 @@ async function bumpCommand(bumpType, updateRuntime, silent, commit, tag, push, m
 
 Co-Authored-By: Claude <noreply@anthropic.com>`;
         try {
-            execSync('git add version-manager.json', { stdio: 'pipe' });
+            // Stage package.json (always) and version-manager.json (if runtime was updated)
+            execSync('git add package.json', { stdio: 'pipe' });
+            if (updateRuntime) {
+                execSync('git add version-manager.json', { stdio: 'pipe' });
+            }
             execSync(`git commit -m '${commitMessage.replace(/'/g, "'\\''")}'`, {
                 stdio: 'pipe',
             });

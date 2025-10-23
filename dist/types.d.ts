@@ -28,7 +28,6 @@ export declare const VersionCalculationModeSchema: z.ZodEnum<{
     "append-commits": "append-commits";
 }>;
 export declare const VersionManagerConfigSchema: z.ZodObject<{
-    codeVersionBase: z.ZodString;
     runtimeVersion: z.ZodString;
     versionCalculationMode: z.ZodEnum<{
         "add-to-patch": "add-to-patch";
@@ -40,10 +39,11 @@ export declare const GenerationTriggerSchema: z.ZodEnum<{
     cli: "cli";
 }>;
 export declare const DynamicVersionSchema: z.ZodObject<{
+    baseVersion: z.ZodString;
     branch: z.ZodString;
     buildNumber: z.ZodString;
-    codeVersion: z.ZodString;
     dirty: z.ZodBoolean;
+    dynamicVersion: z.ZodString;
     generationTrigger: z.ZodEnum<{
         "git-hook": "git-hook";
         cli: "cli";
