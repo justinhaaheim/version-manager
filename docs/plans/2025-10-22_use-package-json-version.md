@@ -1,7 +1,7 @@
 # Use package.json version instead of codeVersionBase
 
-**Date:** 2025-10-22
-**Status:** Planning
+**Date:** 2025-10-22 (continued 2025-10-23)
+**Status:** ✅ Complete
 
 ## Goal
 
@@ -128,3 +128,77 @@ Update test fixtures and assertions:
     "versionCalculationMode": "append-commits"
   }
   ```
+
+## Completion Summary
+
+✅ **Completed on 2025-10-23**
+
+### What Was Done
+
+**Phase 1: Migration to package.json** (Commit: 689c0e5)
+
+- Removed `codeVersionBase` from `VersionManagerConfigSchema`
+- Added `getPackageVersion()` and `updatePackageVersion()` to script-manager.ts
+- Updated `generateFileBasedVersion()` to read from package.json and track package.json version changes
+- Updated `bumpVersion()` to modify package.json instead of version-manager.json
+- Updated CLI validation to require package.json
+- Updated git staging to stage package.json
+- All 35 tests passed
+
+**Phase 2: Rename to dynamicVersion and add baseVersion** (Commit: 9e206ae)
+
+- Renamed `codeVersion` to `dynamicVersion` in DynamicVersionSchema
+- Added `baseVersion` field containing raw package.json version
+- Updated `generateFileBasedVersion()` to populate both fields
+- Updated `bumpVersion()` to use dynamicVersion
+- Updated CLI output to display both base and dynamic versions
+- Updated reader.ts example
+
+**Test Updates** (Commit: 32cc52b)
+
+- Removed `codeVersionBase` from all fixture configs
+- Updated repo-fixtures helpers to create package.json with version
+- Renamed `codeVersion` to `dynamicVersion` in all test assertions
+- Updated git-hooks tests to create package.json before version-manager.json
+- Replaced BUILD_NUMBER env var tests with build number format tests
+- Fixed lint-staged config to only run ESLint on src files
+- All 35 tests passing
+
+**Documentation Updates** (Commit: 08c4d73)
+
+- Updated CLAUDE.md with new field names and structures
+- Updated README.md to reference package.json as base version source
+- Updated all code examples and TypeScript interfaces
+
+**Final Fix** (Commit: 5e3ed38)
+
+- Fixed test for repos without version-manager.json to create package.json
+- All 35 tests passing
+
+### New Schema
+
+**DynamicVersion (dynamic-version.local.json)**
+
+```typescript
+{
+  baseVersion: string; // NEW - raw version from package.json
+  dynamicVersion: string; // RENAMED from codeVersion
+  runtimeVersion: string;
+  buildNumber: string; // ALWAYS generated (not from env)
+  branch: string;
+  dirty: boolean;
+  generationTrigger: 'git-hook' | 'cli';
+  timestamp: string;
+}
+```
+
+**VersionManagerConfig (version-manager.json)**
+
+```typescript
+{
+  runtimeVersion: string;
+  versionCalculationMode: 'add-to-patch' | 'append-commits';
+}
+```
+
+// Note: codeVersionBase removed - now uses package.json version field
