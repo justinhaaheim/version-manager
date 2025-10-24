@@ -36,7 +36,20 @@ function checkGitignore() {
         return false;
     }
     const content = (0, fs_1.readFileSync)(gitignorePath, 'utf-8');
-    return content.includes('*.local.json') || content.includes('.local.json');
+    const lines = content.split('\n');
+    // Check for active (uncommented) gitignore patterns
+    for (const line of lines) {
+        const trimmed = line.trim();
+        // Skip empty lines and comments
+        if (trimmed === '' || trimmed.startsWith('#')) {
+            continue;
+        }
+        // Check if this line matches our patterns
+        if (trimmed === '*.local.json' || trimmed === '.local.json') {
+            return true;
+        }
+    }
+    return false;
 }
 /**
  * Check if Husky is installed in the project

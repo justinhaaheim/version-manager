@@ -42,6 +42,7 @@ const path_1 = require("path");
 const readline = __importStar(require("readline"));
 const helpers_1 = require("yargs/helpers");
 const yargs_1 = __importDefault(require("yargs/yargs"));
+const package_json_1 = __importDefault(require("../package.json"));
 const git_hooks_manager_1 = require("./git-hooks-manager");
 const script_manager_1 = require("./script-manager");
 const version_generator_1 = require("./version-generator");
@@ -156,9 +157,9 @@ async function installCommand(incrementPatch, outputPath, silent, noFail, gitHoo
         console.log('   - Rebases (post-rewrite)');
         // Add scripts to package.json during install
         console.log('\n📝 Checking package.json scripts...');
-        const packageJson = (0, script_manager_1.readPackageJson)();
-        if (packageJson) {
-            const hasExisting = (0, script_manager_1.hasExistingDynamicVersionScripts)(packageJson);
+        const projectPackageJson = (0, script_manager_1.readPackageJson)();
+        if (projectPackageJson) {
+            const hasExisting = (0, script_manager_1.hasExistingDynamicVersionScripts)(projectPackageJson);
             if (hasExisting) {
                 console.log('   ℹ️  Existing dynamic-version scripts detected. Preserving customizations.');
             }
@@ -187,19 +188,19 @@ async function installCommand(incrementPatch, outputPath, silent, noFail, gitHoo
 }
 // Install scripts command handler
 async function installScriptsCommand() {
-    const packageJson = (0, script_manager_1.readPackageJson)();
-    if (!packageJson) {
+    const projectPackageJson = (0, script_manager_1.readPackageJson)();
+    if (!projectPackageJson) {
         console.error('❌ No package.json found in current directory');
         process.exit(1);
     }
-    const hasExisting = (0, script_manager_1.hasExistingDynamicVersionScripts)(packageJson);
-    const conflicts = (0, script_manager_1.getConflictingScripts)(packageJson);
+    const hasExisting = (0, script_manager_1.hasExistingDynamicVersionScripts)(projectPackageJson);
+    const conflicts = (0, script_manager_1.getConflictingScripts)(projectPackageJson);
     if (hasExisting) {
         console.log('⚠️  Existing dynamic-version scripts detected:');
         if (conflicts.length > 0) {
             console.log('\nThe following scripts would be overwritten:');
             for (const conflict of conflicts) {
-                console.log(`  - ${conflict.name}: ${packageJson.scripts?.[conflict.name]}`);
+                console.log(`  - ${conflict.name}: ${projectPackageJson.scripts?.[conflict.name]}`);
             }
         }
         const shouldForce = await promptUser('\nDo you want to add/update the scripts anyway? (y/N): ');
@@ -414,7 +415,7 @@ async function main() {
         })
             .help()
             .alias('help', 'h')
-            .version()
+            .version(package_json_1.default.version)
             .alias('version', 'v')
             .example('$0', 'Generate version file only')
             .example('$0 install', 'Install git hooks and scripts')
