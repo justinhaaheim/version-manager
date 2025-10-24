@@ -39,6 +39,11 @@ const DEFAULT_SCRIPTS: ScriptEntry[] = [
 // Lifecycle scripts that regenerate version before dev/build/start
 const LIFECYCLE_SCRIPTS: ScriptEntry[] = [
   {
+    command: 'npx @justinhaaheim/version-manager --no-fail',
+    description: 'Generate version file after npm install (for CI)',
+    name: 'prepare',
+  },
+  {
     // command: 'npx @justinhaaheim/version-manager --silent --no-fail',
     command: 'npx @justinhaaheim/version-manager',
     description: 'Regenerate version before build',
@@ -154,13 +159,24 @@ export function addScriptsToPackageJson(
 
   // Add or update scripts
   for (const script of scriptsToAdd) {
-    if (
-      packageJson.scripts[script.name] &&
-      packageJson.scripts[script.name] !== script.command
-    ) {
-      conflictsOverwritten.push(script.name);
+    const existingScript = packageJson.scripts[script.name];
+
+    // Special handling for 'prepare' script - append instead of replace
+    if (script.name === 'prepare' && existingScript) {
+      // Check if our command is already in the existing prepare script
+      if (!existingScript.includes('@justinhaaheim/version-manager')) {
+        // Append our command to the existing prepare script
+        packageJson.scripts[script.name] =
+          `${existingScript} && ${script.command}`;
+      }
+      // If it already includes our command, skip to avoid duplicates
+    } else {
+      // Normal handling for other scripts - replace
+      if (existingScript && existingScript !== script.command) {
+        conflictsOverwritten.push(script.name);
+      }
+      packageJson.scripts[script.name] = script.command;
     }
-    packageJson.scripts[script.name] = script.command;
   }
 
   // Write back to package.json
