@@ -6,6 +6,7 @@ import * as readline from 'readline';
 import {hideBin} from 'yargs/helpers';
 import yargs from 'yargs/yargs';
 
+import packageJson from '../package.json';
 import {checkGitignore, installGitHooks} from './git-hooks-manager';
 import {
   addScriptsToPackageJson,
@@ -175,9 +176,9 @@ async function installCommand(
 
     // Add scripts to package.json during install
     console.log('\n📝 Checking package.json scripts...');
-    const packageJson = readPackageJson();
-    if (packageJson) {
-      const hasExisting = hasExistingDynamicVersionScripts(packageJson);
+    const projectPackageJson = readPackageJson();
+    if (projectPackageJson) {
+      const hasExisting = hasExistingDynamicVersionScripts(projectPackageJson);
       if (hasExisting) {
         console.log(
           '   ℹ️  Existing dynamic-version scripts detected. Preserving customizations.',
@@ -214,14 +215,14 @@ async function installCommand(
 
 // Install scripts command handler
 async function installScriptsCommand(): Promise<void> {
-  const packageJson = readPackageJson();
-  if (!packageJson) {
+  const projectPackageJson = readPackageJson();
+  if (!projectPackageJson) {
     console.error('❌ No package.json found in current directory');
     process.exit(1);
   }
 
-  const hasExisting = hasExistingDynamicVersionScripts(packageJson);
-  const conflicts = getConflictingScripts(packageJson);
+  const hasExisting = hasExistingDynamicVersionScripts(projectPackageJson);
+  const conflicts = getConflictingScripts(projectPackageJson);
 
   if (hasExisting) {
     console.log('⚠️  Existing dynamic-version scripts detected:');
@@ -229,7 +230,7 @@ async function installScriptsCommand(): Promise<void> {
       console.log('\nThe following scripts would be overwritten:');
       for (const conflict of conflicts) {
         console.log(
-          `  - ${conflict.name}: ${packageJson.scripts?.[conflict.name]}`,
+          `  - ${conflict.name}: ${projectPackageJson.scripts?.[conflict.name]}`,
         );
       }
     }
@@ -511,7 +512,7 @@ async function main() {
       )
       .help()
       .alias('help', 'h')
-      .version()
+      .version(packageJson.version)
       .alias('version', 'v')
       .example('$0', 'Generate version file only')
       .example('$0 install', 'Install git hooks and scripts')
