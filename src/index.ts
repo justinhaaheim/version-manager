@@ -320,18 +320,18 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
       // Optionally create git tag
       if (tag) {
         if (!silent) {
-          console.log(`🏷️  Creating git tag v${result.newVersion}...`);
+          console.log(`🏷️  Creating git tag ${result.newVersion}...`);
         }
 
         const tagMessage = `Version ${result.newVersion}`;
         try {
           execSync(
-            `git tag -a v${result.newVersion} -m '${tagMessage.replace(/'/g, "'\\''")}'`,
+            `git tag -a ${result.newVersion} -m '${tagMessage.replace(/'/g, "'\\''")}'`,
             {stdio: 'pipe'},
           );
 
           if (!silent) {
-            console.log(`✅ Tag v${result.newVersion} created`);
+            console.log(`✅ Tag ${result.newVersion} created`);
           }
         } catch (error) {
           if (!silent) {
