@@ -141,7 +141,7 @@ async function generateVersionFile(outputPath, silent, gitHook = false) {
     }
 }
 // Install command handler
-async function installCommand(incrementPatch, outputPath, silent, noFail, gitHook = false) {
+async function installCommand(incrementPatch, outputPath, silent, noFail, force, gitHook = false) {
     // First, generate the version file
     await generateVersionFile(outputPath, silent, gitHook);
     if (!silent) {
@@ -160,13 +160,17 @@ async function installCommand(incrementPatch, outputPath, silent, noFail, gitHoo
         const projectPackageJson = (0, script_manager_1.readPackageJson)();
         if (projectPackageJson) {
             const hasExisting = (0, script_manager_1.hasExistingDynamicVersionScripts)(projectPackageJson);
-            if (hasExisting) {
+            if (hasExisting && !force) {
                 console.log('   ℹ️  Existing dynamic-version scripts detected. Preserving customizations.');
+                console.log('   💡 Use --force to overwrite existing scripts with defaults');
             }
             else {
-                const result = (0, script_manager_1.addScriptsToPackageJson)(false, true);
+                const result = (0, script_manager_1.addScriptsToPackageJson)(force, true);
                 if (result.success) {
                     console.log(`   ✅ ${result.message}`);
+                    if (result.conflictsOverwritten.length > 0) {
+                        console.log(`   Scripts overwritten: ${result.conflictsOverwritten.join(', ')}`);
+                    }
                     console.log('\n   Added scripts:');
                     console.log('   - npm run dynamic-version           # Reinstall/update');
                     console.log('   - npm run dynamic-version:generate   # Generate version file');
@@ -187,7 +191,7 @@ async function installCommand(incrementPatch, outputPath, silent, noFail, gitHoo
     }
 }
 // Install scripts command handler
-async function installScriptsCommand() {
+async function installScriptsCommand(force) {
     const projectPackageJson = (0, script_manager_1.readPackageJson)();
     if (!projectPackageJson) {
         console.error('❌ No package.json found in current directory');
@@ -203,7 +207,10 @@ async function installScriptsCommand() {
                 console.log(`  - ${conflict.name}: ${projectPackageJson.scripts?.[conflict.name]}`);
             }
         }
-        const shouldForce = await promptUser('\nDo you want to add/update the scripts anyway? (y/N): ');
+        let shouldForce = force;
+        if (!force) {
+            shouldForce = await promptUser('\nDo you want to add/update the scripts anyway? (y/N): ');
+        }
         if (!shouldForce) {
             console.log('Script installation cancelled.');
             process.exit(0);
@@ -340,16 +347,28 @@ async function main() {
         })
             .command('install', 'Install git hooks and scripts', (yargsInstance) => yargsInstance.options({
             ...globalOptions,
+            force: {
+                default: false,
+                describe: 'Force script installation even if existing scripts are detected',
+                type: 'boolean',
+            },
             'increment-patch': {
                 default: false,
                 describe: 'Increment patch version with each commit',
                 type: 'boolean',
             },
         }), async (args) => {
-            await installCommand(args['increment-patch'], args.output, args.silent, !args.fail, args['git-hook']);
+            await installCommand(args['increment-patch'], args.output, args.silent, !args.fail, args.force, args['git-hook']);
         })
-            .command('install-scripts', 'Add/update dynamic-version scripts in package.json', (yargsInstance) => yargsInstance.options(globalOptions), async () => {
-            await installScriptsCommand();
+            .command('install-scripts', 'Add/update dynamic-version scripts in package.json', (yargsInstance) => yargsInstance.options({
+            ...globalOptions,
+            force: {
+                default: false,
+                describe: 'Force script installation without prompting (skip confirmation)',
+                type: 'boolean',
+            },
+        }), async (args) => {
+            await installScriptsCommand(args.force);
         })
             .command('bump', 'Bump version to next major, minor, or patch', (yargsInstance) => yargsInstance.options({
             ...globalOptions,
@@ -419,9 +438,11 @@ async function main() {
             .alias('version', 'v')
             .example('$0', 'Generate version file only')
             .example('$0 install', 'Install git hooks and scripts')
+            .example('$0 install --force', 'Install and force-overwrite scripts')
             .example('$0 install --increment-patch', 'Install with patch increment')
             .example('$0 install --silent --no-fail', 'Install with quiet hooks')
             .example('$0 install-scripts', 'Add/update scripts only')
+            .example('$0 install-scripts --force', 'Force-overwrite scripts')
             .example('$0 bump', 'Bump patch version (default)')
             .example('$0 bump --minor', 'Bump minor version')
             .example('$0 bump --major', 'Bump major version')

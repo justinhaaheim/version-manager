@@ -12,8 +12,8 @@ const fs_1 = require("fs");
 const path_1 = require("path");
 const DEFAULT_SCRIPTS = [
     {
-        command: 'npx @justinhaaheim/version-manager install',
-        description: 'Install git hooks and generate version file',
+        command: 'npx @justinhaaheim/version-manager',
+        description: 'Generate an up-to-date version file',
         name: 'dynamic-version',
     },
     {

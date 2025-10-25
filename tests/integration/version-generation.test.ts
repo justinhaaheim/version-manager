@@ -244,7 +244,9 @@ describe('Version Generation', () => {
       );
 
       // Now modify package.json version in working tree (uncommitted)
-      const packageJson = JSON.parse(repo.readFile('package.json'));
+      const packageJson = JSON.parse(repo.readFile('package.json')) as {
+        version: string;
+      };
       packageJson.version = '0.2.0';
       repo.writeFile('package.json', JSON.stringify(packageJson, null, 2));
 
@@ -273,7 +275,9 @@ describe('Version Generation', () => {
       );
 
       // Now modify package.json version in working tree (uncommitted)
-      const packageJson = JSON.parse(repo.readFile('package.json'));
+      const packageJson = JSON.parse(repo.readFile('package.json')) as {
+        version: string;
+      };
       packageJson.version = '0.2.0';
       repo.writeFile('package.json', JSON.stringify(packageJson, null, 2));
 
