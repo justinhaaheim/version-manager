@@ -1,7 +1,7 @@
 {
   "name": "@justinhaaheim/version-manager",
   "description": "A comprehensive version tracking system for JavaScript/TypeScript projects with support for semantic versioning, build numbers, and runtime versions",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "main": "dist/reader.js",
   "types": "dist/reader.d.ts",
   "bin": {
