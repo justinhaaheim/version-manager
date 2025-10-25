@@ -155,6 +155,7 @@ async function installCommand(
   outputPath: string,
   silent: boolean,
   noFail: boolean,
+  force: boolean,
   gitHook = false,
 ): Promise<void> {
   // First, generate the version file
@@ -179,14 +180,22 @@ async function installCommand(
     const projectPackageJson = readPackageJson();
     if (projectPackageJson) {
       const hasExisting = hasExistingDynamicVersionScripts(projectPackageJson);
-      if (hasExisting) {
+      if (hasExisting && !force) {
         console.log(
           '   ℹ️  Existing dynamic-version scripts detected. Preserving customizations.',
         );
+        console.log(
+          '   💡 Use --force to overwrite existing scripts with defaults',
+        );
       } else {
-        const result = addScriptsToPackageJson(false, true);
+        const result = addScriptsToPackageJson(force, true);
         if (result.success) {
           console.log(`   ✅ ${result.message}`);
+          if (result.conflictsOverwritten.length > 0) {
+            console.log(
+              `   Scripts overwritten: ${result.conflictsOverwritten.join(', ')}`,
+            );
+          }
           console.log('\n   Added scripts:');
           console.log(
             '   - npm run dynamic-version           # Reinstall/update',
@@ -214,7 +223,7 @@ async function installCommand(
 }
 
 // Install scripts command handler
-async function installScriptsCommand(): Promise<void> {
+async function installScriptsCommand(force: boolean): Promise<void> {
   const projectPackageJson = readPackageJson();
   if (!projectPackageJson) {
     console.error('❌ No package.json found in current directory');
@@ -235,9 +244,12 @@ async function installScriptsCommand(): Promise<void> {
       }
     }
 
-    const shouldForce = await promptUser(
-      '\nDo you want to add/update the scripts anyway? (y/N): ',
-    );
+    let shouldForce = force;
+    if (!force) {
+      shouldForce = await promptUser(
+        '\nDo you want to add/update the scripts anyway? (y/N): ',
+      );
+    }
 
     if (!shouldForce) {
       console.log('Script installation cancelled.');
@@ -404,6 +416,12 @@ async function main() {
         (yargsInstance) =>
           yargsInstance.options({
             ...globalOptions,
+            force: {
+              default: false,
+              describe:
+                'Force script installation even if existing scripts are detected',
+              type: 'boolean' as const,
+            },
             'increment-patch': {
               default: false,
               describe: 'Increment patch version with each commit',
@@ -416,6 +434,7 @@ async function main() {
             args.output,
             args.silent,
             !args.fail,
+            args.force,
             args['git-hook'],
           );
         },
@@ -423,9 +442,18 @@ async function main() {
       .command(
         'install-scripts',
         'Add/update dynamic-version scripts in package.json',
-        (yargsInstance) => yargsInstance.options(globalOptions),
-        async () => {
-          await installScriptsCommand();
+        (yargsInstance) =>
+          yargsInstance.options({
+            ...globalOptions,
+            force: {
+              default: false,
+              describe:
+                'Force script installation without prompting (skip confirmation)',
+              type: 'boolean' as const,
+            },
+          }),
+        async (args) => {
+          await installScriptsCommand(args.force);
         },
       )
       .command(
@@ -516,9 +544,11 @@ async function main() {
       .alias('version', 'v')
       .example('$0', 'Generate version file only')
       .example('$0 install', 'Install git hooks and scripts')
+      .example('$0 install --force', 'Install and force-overwrite scripts')
       .example('$0 install --increment-patch', 'Install with patch increment')
       .example('$0 install --silent --no-fail', 'Install with quiet hooks')
       .example('$0 install-scripts', 'Add/update scripts only')
+      .example('$0 install-scripts --force', 'Force-overwrite scripts')
       .example('$0 bump', 'Bump patch version (default)')
       .example('$0 bump --minor', 'Bump minor version')
       .example('$0 bump --major', 'Bump major version')
