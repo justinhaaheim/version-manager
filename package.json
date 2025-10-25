@@ -38,7 +38,7 @@
     "signal:parallel": "concurrently --names \"TS,LINT,PRETTIER\" -c \"bgBlack.bold,bgRed.bold,bgCyan.bold\" \"bun run ts-check\" \"bun run lint\" \"bun run prettier-check\"",
     "ts-check": "tsc --noEmit",
     "ts-check-masked": "bun run ts-check",
-    "prepare": "husky",
+    "prepare": "husky && (test -d .git && bun src/index.ts --no-fail || true)",
     "test:local": "bun src/index.ts",
     "test:local:help": "bun src/index.ts --help",
     "test:local:install": "bun src/index.ts install",
