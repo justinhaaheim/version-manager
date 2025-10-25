@@ -1,7 +1,7 @@
 {
   "name": "@justinhaaheim/version-manager",
   "description": "A comprehensive version tracking system for JavaScript/TypeScript projects with support for semantic versioning, build numbers, and runtime versions",
-  "version": "0.2.5",
+  "version": "0.2.7",
   "main": "dist/reader.js",
   "types": "dist/reader.d.ts",
   "bin": {
@@ -46,6 +46,7 @@
     "test:watch": "bun test --watch",
     "test:fixtures": "bun tests/scripts/create-fixtures.ts",
     "prestart": "bun run dynamic-version:generate",
+    "jvm": "bun src/index.ts",
     "dynamic-version": "bun src/index.ts",
     "dynamic-version:install": "bun src/index.ts install",
     "dynamic-version:install-scripts": "bun src/index.ts install-scripts",
