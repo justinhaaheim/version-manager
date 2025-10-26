@@ -120,6 +120,7 @@ src/
   git-utils.ts             # Git commands (describe, log, commit tracking)
   git-hooks-manager.ts     # Git hook installation/update logic
   script-manager.ts        # package.json script management
+  metro-plugin.ts          # Metro bundler plugin for auto-regeneration
   reader.ts                # Public API for reading version files
   types.ts                 # TypeScript type definitions
 
@@ -172,6 +173,14 @@ docs/
 - `getConflictingScripts()`: Find scripts that would be overwritten
 - `listDefaultScripts()`: Show added scripts to user
 - Preserves package.json formatting when updating
+
+**metro-plugin.ts** (Metro Bundler Integration)
+- `withVersionManager()`: Metro config enhancer for auto-regeneration
+- Runs during Metro's serialization phase
+- Generates version data in memory and compares with existing file
+- Only writes if content has changed (prevents rebuild loops)
+- Silently fails on errors to avoid breaking builds
+- Exported as `@justinhaaheim/version-manager/metro-plugin`
 
 **reader.ts** (Public API)
 - Public export: `readDynamicVersion()`
@@ -432,3 +441,33 @@ When scripts are installed via `install` command, npm lifecycle hooks regenerate
 This ensures the version file is always fresh when starting dev servers or building for production, even if you haven't committed recently.
 
 **Note:** Build hooks use `--silent --no-fail` flags to avoid breaking builds if version generation encounters issues.
+
+### 3. Metro Plugin (Automatic - React Native/Expo)
+For React Native and Expo projects using Metro bundler, you can auto-regenerate the version file on every bundle without causing infinite rebuild loops:
+
+**Setup:**
+```javascript
+// metro.config.js
+const { getDefaultConfig } = require('expo/metro-config');
+const { withVersionManager } = require('@justinhaaheim/version-manager/metro-plugin');
+
+const config = getDefaultConfig(__dirname);
+module.exports = withVersionManager(config);
+```
+
+**How it works:**
+1. Plugin runs during Metro's serialization phase (before bundle output)
+2. Generates version data in memory
+3. Compares with existing file content
+4. **Only writes if content has changed** - prevents rebuild loops
+
+**Benefits:**
+- ✅ Version file stays current during long dev sessions
+- ✅ Git hooks still work - Metro detects their changes and rebuilds
+- ✅ No infinite loops - content comparison prevents unnecessary writes
+- ✅ Silently fails if version generation fails (won't break builds)
+
+**Interaction with git hooks:**
+- After commit: Git hook writes → Metro sees change → rebuilds with fresh version ✅
+- After checkout: Git hook writes → Metro sees change → rebuilds ✅
+- During HMR: Same version → no write → no rebuild → no loop ✅
