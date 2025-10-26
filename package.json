@@ -11,7 +11,8 @@
   },
   "exports": {
     ".": "./dist/reader.js",
-    "./reader": "./dist/reader.js"
+    "./reader": "./dist/reader.js",
+    "./metro-plugin": "./dist/metro-plugin.js"
   },
   "files": [
     "dist",

@@ -1,0 +1,57 @@
+# Metro Plugin Implementation - 2025-10-26
+
+## Goal
+
+Implement a Metro bundler plugin that auto-regenerates the version file during development without causing infinite rebuild loops.
+
+## Problem to Solve
+
+- We want the version file to regenerate on every Metro bundle
+- But writing the file triggers Metro's file watcher → new rebuild → infinite loop
+- Git hooks also regenerate the file, and Metro should detect those changes
+
+## Solution Strategy
+
+**Content-based writing**: Only write the file if its content has actually changed
+
+### How It Works
+
+1. Plugin runs during serialization (before bundle output)
+2. Generate version data in memory
+3. Compare with existing file content
+4. Only write if different
+
+### Why This Prevents Loops
+
+- **Normal HMR**: Same version → no write → no watcher trigger → no loop ✅
+- **After commit**: Git hook writes → Metro rebuilds → plugin generates same content → no extra write ✅
+- **After checkout**: Git hook writes new version → Metro sees change → rebuilds with fresh data ✅
+
+## Implementation Tasks
+
+1. ✅ Create scratchpad
+2. Refactor `generateFileBasedVersion()` to separate concerns
+   - Extract data generation logic
+   - Create `generateVersionData()` that returns object
+   - Keep `generateFileBasedVersion()` as wrapper that writes
+3. Create `src/metro-plugin.ts`
+   - Simple content-comparison logic
+   - No caching, no performance optimizations yet
+4. Update package.json exports
+5. Update CLAUDE.md docs
+6. Test locally
+7. Commit regularly
+
+## Design Notes
+
+- Keep it simple: no caching, no git commands in plugin
+- Let existing git hooks handle commit/checkout regeneration
+- Plugin just ensures version is current during builds
+- Blocklist NOT needed with this approach
+
+## File Changes
+
+- `src/version-generator.ts` - Add `generateVersionData()`, refactor existing function
+- `src/metro-plugin.ts` - New file
+- `package.json` - Add export for metro-plugin
+- `CLAUDE.md` - Document Metro plugin usage
