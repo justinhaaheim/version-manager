@@ -37,7 +37,7 @@
 
 ## CLI Commands
 
-The tool provides four main commands:
+The tool provides five main commands:
 
 ### 1. Generate Version File (default)
 ```bash
@@ -111,6 +111,39 @@ npx @justinhaaheim/version-manager install-scripts
 - Only updates package.json scripts (doesn't touch git hooks)
 - Prompts before overwriting existing scripts
 
+### 5. Watch Files
+```bash
+npx @justinhaaheim/version-manager watch [options]
+```
+- Watches for file changes and auto-regenerates version file
+- Alternative to Metro plugin for non-React Native projects
+- Respects .gitignore patterns
+
+**What it watches:**
+- `.git/HEAD` and `.git/refs/**` - Git state changes (commits, checkouts, merges)
+- `package.json` - Base version changes
+- `version-manager.json` - Config changes
+- All project files (excluding gitignored files)
+
+**Options:**
+- `--debounce <ms>`: Debounce delay in milliseconds (default: 2000)
+- `--output, -o <path>`: Output file path (default: ./dynamic-version.local.json)
+- `--silent, -s`: Suppress console output
+- `--fail/--no-fail`: Exit with error code on failures
+
+**Examples:**
+```bash
+npx @justinhaaheim/version-manager watch                    # Start with defaults
+npx @justinhaaheim/version-manager watch --debounce 500     # Fast debounce
+npx @justinhaaheim/version-manager watch --silent           # Silent mode
+```
+
+**Usage Tips:**
+- Run in a separate terminal during development
+- Press Ctrl+C to stop watching
+- Useful for projects not using Metro bundler
+- Debouncing prevents rapid regeneration during multi-file changes
+
 ## Codebase Structure
 
 ```
@@ -121,6 +154,7 @@ src/
   git-hooks-manager.ts     # Git hook installation/update logic
   script-manager.ts        # package.json script management
   metro-plugin.ts          # Metro bundler plugin for auto-regeneration
+  watcher.ts               # File watcher for auto-regeneration
   reader.ts                # Public API for reading version files
   types.ts                 # TypeScript type definitions
 
@@ -181,6 +215,15 @@ docs/
 - Only writes if content has changed (prevents rebuild loops)
 - Silently fails on errors to avoid breaking builds
 - Exported as `@justinhaaheim/version-manager/metro-plugin`
+
+**watcher.ts** (File Watcher)
+- `startWatcher()`: Main file watching function for auto-regeneration
+- Uses chokidar for cross-platform file watching
+- Watches git state (.git/HEAD, .git/refs), config files, and project files
+- Respects .gitignore patterns automatically
+- Debounces changes to prevent rapid regeneration
+- Content-based writing (only writes if version changed)
+- Graceful error handling and cleanup
 
 **reader.ts** (Public API)
 - Public export: `readDynamicVersion()`
@@ -265,6 +308,7 @@ docs/
 ## Dependencies
 
 **Runtime:**
+- `chokidar` (^3.6.0) - File watching for watch command
 - `yargs` (18.0.0) - CLI argument parsing
 - `zod` (4.1.12) - Schema validation for version files
 
@@ -471,3 +515,35 @@ module.exports = withVersionManager(config);
 - After commit: Git hook writes → Metro sees change → rebuilds with fresh version ✅
 - After checkout: Git hook writes → Metro sees change → rebuilds ✅
 - During HMR: Same version → no write → no rebuild → no loop ✅
+
+### 4. File Watcher (Manual - Any Project)
+For any project (not just React Native), you can run the file watcher in a separate terminal:
+
+**Setup:**
+```bash
+# Run in a separate terminal during development
+npx @justinhaaheim/version-manager watch
+
+# Or with custom debounce
+npx @justinhaaheim/version-manager watch --debounce 500
+```
+
+**How it works:**
+1. Uses chokidar to watch git state, config files, and all project files
+2. Respects .gitignore patterns automatically
+3. Debounces changes (default 2000ms) to batch rapid file modifications
+4. Only writes if version content changed (prevents unnecessary writes)
+
+**Benefits:**
+- ✅ Works with any build tool or framework
+- ✅ Alternative to Metro plugin for non-React Native projects
+- ✅ Respects .gitignore (won't trigger on build artifacts)
+- ✅ Configurable debouncing prevents spam
+- ✅ Clear console output shows when version was regenerated
+- ✅ Graceful shutdown with Ctrl+C
+
+**Use cases:**
+- Webpack/Vite/Rollup projects during development
+- Backend projects that use version info
+- Any project where you want live version updates during development
+- Projects using build tools other than Metro
