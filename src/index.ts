@@ -21,6 +21,7 @@ import {
   createDefaultVersionManagerConfig,
   generateFileBasedVersion,
 } from './version-generator';
+import {startWatcher} from './watcher';
 
 // TODO: Refactor this to use prompts library
 async function promptUser(question: string): Promise<boolean> {
@@ -397,6 +398,39 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
   }
 }
 
+// Watch command handler
+async function watchCommand(
+  outputPath: string,
+  debounce: number,
+  silent: boolean,
+  failOnError: boolean,
+): Promise<void> {
+  if (!silent) {
+    console.log('🚀 Starting file watcher...\n');
+  }
+
+  const cleanup = await startWatcher({
+    debounce,
+    failOnError,
+    outputPath,
+    silent,
+  });
+
+  // Handle graceful shutdown on Ctrl+C
+  const handleShutdown = (): void => {
+    cleanup();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', handleShutdown);
+  process.on('SIGTERM', handleShutdown);
+
+  // Keep process alive
+  await new Promise(() => {
+    // Never resolves - keeps watching until interrupted
+  });
+}
+
 async function main() {
   try {
     await yargs(hideBin(process.argv))
@@ -538,6 +572,27 @@ async function main() {
           );
         },
       )
+      .command(
+        'watch',
+        'Watch files and auto-regenerate version on changes',
+        (yargsInstance) =>
+          yargsInstance.options({
+            ...globalOptions,
+            debounce: {
+              default: 2000,
+              describe: 'Debounce delay in milliseconds',
+              type: 'number' as const,
+            },
+          }),
+        async (args) => {
+          await watchCommand(
+            args.output,
+            args.debounce,
+            args.silent,
+            args.fail,
+          );
+        },
+      )
       .help()
       .alias('help', 'h')
       .version(packageJson.version)
@@ -554,6 +609,9 @@ async function main() {
       .example('$0 bump --major', 'Bump major version')
       .example('$0 bump --commit', 'Bump and commit automatically')
       .example('$0 bump --runtime', 'Bump and update runtime version')
+      .example('$0 watch', 'Watch files and auto-regenerate')
+      .example('$0 watch --debounce 500', 'Watch with 500ms debounce')
+      .example('$0 watch --silent', 'Watch in silent mode')
       .strict()
       .parseAsync();
 
