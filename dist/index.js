@@ -46,6 +46,7 @@ const package_json_1 = __importDefault(require("../package.json"));
 const git_hooks_manager_1 = require("./git-hooks-manager");
 const script_manager_1 = require("./script-manager");
 const version_generator_1 = require("./version-generator");
+const watcher_1 = require("./watcher");
 // TODO: Refactor this to use prompts library
 async function promptUser(question) {
     const rl = readline.createInterface({
@@ -337,6 +338,29 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
         console.log(tip);
     }
 }
+// Watch command handler
+async function watchCommand(outputPath, debounce, silent, failOnError) {
+    if (!silent) {
+        console.log('🚀 Starting file watcher...\n');
+    }
+    const cleanup = await (0, watcher_1.startWatcher)({
+        debounce,
+        failOnError,
+        outputPath,
+        silent,
+    });
+    // Handle graceful shutdown on Ctrl+C
+    const handleShutdown = () => {
+        cleanup();
+        process.exit(0);
+    };
+    process.on('SIGINT', handleShutdown);
+    process.on('SIGTERM', handleShutdown);
+    // Keep process alive
+    await new Promise(() => {
+        // Never resolves - keeps watching until interrupted
+    });
+}
 async function main() {
     try {
         await (0, yargs_1.default)((0, helpers_1.hideBin)(process.argv))
@@ -432,6 +456,16 @@ async function main() {
             }
             await bumpCommand(bumpType, args.runtime, args.silent, args.commit, args.tag, args.push, args.message, args['git-hook']);
         })
+            .command('watch', 'Watch files and auto-regenerate version on changes', (yargsInstance) => yargsInstance.options({
+            ...globalOptions,
+            debounce: {
+                default: 2000,
+                describe: 'Debounce delay in milliseconds',
+                type: 'number',
+            },
+        }), async (args) => {
+            await watchCommand(args.output, args.debounce, args.silent, args.fail);
+        })
             .help()
             .alias('help', 'h')
             .version(package_json_1.default.version)
@@ -448,6 +482,9 @@ async function main() {
             .example('$0 bump --major', 'Bump major version')
             .example('$0 bump --commit', 'Bump and commit automatically')
             .example('$0 bump --runtime', 'Bump and update runtime version')
+            .example('$0 watch', 'Watch files and auto-regenerate')
+            .example('$0 watch --debounce 500', 'Watch with 500ms debounce')
+            .example('$0 watch --silent', 'Watch in silent mode')
             .strict()
             .parseAsync();
         process.exit(0);
