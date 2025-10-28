@@ -1,3 +1,5 @@
+import type {DynamicVersion} from '../../src/types';
+
 import {afterEach, beforeEach, describe, expect, test} from 'bun:test';
 import {spawn} from 'child_process';
 import * as fs from 'fs';
@@ -6,6 +8,12 @@ import * as path from 'path';
 import {assertValidVersionJson} from '../helpers/assertions';
 import {setupRepoWithVersionConfig} from '../helpers/repo-fixtures';
 import {TestRepo} from '../helpers/test-repo';
+
+// Simple type for package.json version field
+interface PackageJson {
+  [key: string]: unknown;
+  version: string;
+}
 
 /**
  * Helper to start watcher in background
@@ -154,14 +162,16 @@ describe('Watch Command', () => {
       await watcher.waitForReady();
 
       // Modify package.json to trigger regeneration
-      const packageJson = JSON.parse(repo.readFile('package.json'));
+      const packageJson = JSON.parse(
+        repo.readFile('package.json'),
+      ) as PackageJson;
       packageJson.version = '0.2.0';
       repo.writeFile('package.json', JSON.stringify(packageJson, null, 2));
 
       // Wait for version file to be regenerated
       const changed = await waitForFileChange(versionFilePath, {
         checkContent: (content) => {
-          const version = JSON.parse(content);
+          const version = JSON.parse(content) as DynamicVersion;
           return version.baseVersion === '0.2.0';
         },
         timeout: 5000,
@@ -297,7 +307,7 @@ describe('Watch Command', () => {
       // Wait for version file to be regenerated with new commit count
       const changed = await waitForFileChange(versionFilePath, {
         checkContent: (content) => {
-          const version = JSON.parse(content);
+          const version = JSON.parse(content) as DynamicVersion;
           // Should be 0.1.0+1 (one commit after config)
           return version.dynamicVersion === '0.1.0+1';
         },
@@ -334,14 +344,16 @@ describe('Watch Command', () => {
       await watcher.waitForReady();
 
       // Update runtime version in config
-      const config = JSON.parse(repo.readFile('version-manager.json'));
+      const config = JSON.parse(
+        repo.readFile('version-manager.json'),
+      ) as Record<string, unknown>;
       config.runtimeVersion = '0.2.0';
       repo.writeFile('version-manager.json', JSON.stringify(config, null, 2));
 
       // Wait for version file to be regenerated with new runtime version
       const changed = await waitForFileChange(versionFilePath, {
         checkContent: (content) => {
-          const version = JSON.parse(content);
+          const version = JSON.parse(content) as DynamicVersion;
           return version.runtimeVersion === '0.2.0';
         },
         timeout: 3000,
@@ -377,7 +389,7 @@ describe('Watch Command', () => {
       await watcher.waitForReady();
 
       const initialContent = fs.readFileSync(versionFilePath, 'utf-8');
-      const initialModTime = fs.statSync(versionFilePath).mtime;
+      const _initialModTime = fs.statSync(versionFilePath).mtime;
 
       // Make a change that doesn't affect version
       repo.writeFile('random-file.txt', 'random content');
@@ -387,11 +399,11 @@ describe('Watch Command', () => {
 
       // Version file content should be the same (or not changed if truly identical)
       const finalContent = fs.readFileSync(versionFilePath, 'utf-8');
-      const finalModTime = fs.statSync(versionFilePath).mtime;
+      const _finalModTime = fs.statSync(versionFilePath).mtime;
 
       // Content should be identical (same version)
-      const initialVersion = JSON.parse(initialContent);
-      const finalVersion = JSON.parse(finalContent);
+      const initialVersion = JSON.parse(initialContent) as DynamicVersion;
+      const finalVersion = JSON.parse(finalContent) as DynamicVersion;
       expect(finalVersion.dynamicVersion).toBe(initialVersion.dynamicVersion);
       expect(finalVersion.baseVersion).toBe(initialVersion.baseVersion);
     } finally {
