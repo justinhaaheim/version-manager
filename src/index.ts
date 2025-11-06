@@ -142,7 +142,11 @@ async function generateVersionFile(
     console.log(`✅ Version generated:`);
     console.log(`   Base version: ${versionInfo.baseVersion}`);
     console.log(`   Dynamic version: ${versionInfo.dynamicVersion}`);
-    console.log(`   Runtime version: ${versionInfo.runtimeVersion}`);
+    if (Object.keys(versionInfo.versions).length > 0) {
+      console.log(
+        `   Custom versions: ${JSON.stringify(versionInfo.versions, null, 2).replace(/\n/g, '\n   ')}`,
+      );
+    }
     if (versionInfo.buildNumber) {
       console.log(`   Build number: ${versionInfo.buildNumber}`);
     }
@@ -284,7 +288,7 @@ async function installScriptsCommand(force: boolean): Promise<void> {
 // Bump version command handler
 async function bumpCommand(
   bumpType: BumpType,
-  updateRuntime: boolean,
+  customVersionsToUpdate: string[],
   silent: boolean,
   commit: boolean,
   tag: boolean,
@@ -293,7 +297,7 @@ async function bumpCommand(
   gitHook = false,
 ): Promise<void> {
   // Bump the version
-  const result = await bumpVersion(bumpType, updateRuntime, silent);
+  const result = await bumpVersion(bumpType, customVersionsToUpdate, silent);
 
   // Regenerate dynamic version file
   if (!silent) {
@@ -317,9 +321,9 @@ async function bumpCommand(
 Co-Authored-By: Claude <noreply@anthropic.com>`;
 
     try {
-      // Stage package.json (always) and version-manager.json (if runtime was updated)
+      // Stage package.json (always) and version-manager.json (if custom versions were updated)
       execSync('git add package.json', {stdio: 'pipe'});
-      if (updateRuntime) {
+      if (result.updatedVersions.length > 0) {
         execSync('git add version-manager.json', {stdio: 'pipe'});
       }
       execSync(`git commit -m '${commitMessage.replace(/'/g, "'\\''")}'`, {
@@ -491,56 +495,57 @@ async function main() {
         },
       )
       .command(
-        'bump',
+        'bump [versions..]',
         'Bump version to next major, minor, or patch',
         (yargsInstance) =>
-          yargsInstance.options({
-            ...globalOptions,
-            commit: {
-              alias: 'c',
-              default: false,
-              describe: 'Commit the version change automatically',
-              type: 'boolean' as const,
-            },
-            major: {
-              default: false,
-              describe: 'Bump major version (e.g., 1.2.3 -> 2.0.0)',
-              type: 'boolean' as const,
-            },
-            message: {
-              alias: 'm',
-              describe: 'Custom commit message (only with --commit)',
+          yargsInstance
+            .positional('versions', {
+              array: true,
+              default: [],
+              describe: 'Custom version names to sync (e.g., runtime, pancake)',
               type: 'string' as const,
-            },
-            minor: {
-              default: false,
-              describe: 'Bump minor version (e.g., 1.2.3 -> 1.3.0)',
-              type: 'boolean' as const,
-            },
-            patch: {
-              default: false,
-              describe: 'Bump patch version (e.g., 1.2.3 -> 1.2.4)',
-              type: 'boolean' as const,
-            },
-            push: {
-              alias: 'p',
-              default: false,
-              describe: 'Push commit and tag to remote (requires --commit)',
-              type: 'boolean' as const,
-            },
-            runtime: {
-              alias: 'r',
-              default: false,
-              describe: 'Also update runtimeVersion to match',
-              type: 'boolean' as const,
-            },
-            tag: {
-              alias: 't',
-              default: false,
-              describe: 'Create git tag (requires --commit)',
-              type: 'boolean' as const,
-            },
-          }),
+            })
+            .options({
+              ...globalOptions,
+              commit: {
+                alias: 'c',
+                default: false,
+                describe: 'Commit the version change automatically',
+                type: 'boolean' as const,
+              },
+              major: {
+                default: false,
+                describe: 'Bump major version (e.g., 1.2.3 -> 2.0.0)',
+                type: 'boolean' as const,
+              },
+              message: {
+                alias: 'm',
+                describe: 'Custom commit message (only with --commit)',
+                type: 'string' as const,
+              },
+              minor: {
+                default: false,
+                describe: 'Bump minor version (e.g., 1.2.3 -> 1.3.0)',
+                type: 'boolean' as const,
+              },
+              patch: {
+                default: false,
+                describe: 'Bump patch version (e.g., 1.2.3 -> 1.2.4)',
+                type: 'boolean' as const,
+              },
+              push: {
+                alias: 'p',
+                default: false,
+                describe: 'Push commit and tag to remote (requires --commit)',
+                type: 'boolean' as const,
+              },
+              tag: {
+                alias: 't',
+                default: false,
+                describe: 'Create git tag (requires --commit)',
+                type: 'boolean' as const,
+              },
+            }),
         async (args) => {
           // Validate that only one bump type is specified
           const bumpTypes = [args.major, args.minor, args.patch].filter(
@@ -560,9 +565,12 @@ async function main() {
             bumpType = 'minor';
           }
 
+          // Get custom versions to update from positional args
+          const customVersionsToUpdate = (args.versions ?? []) as string[];
+
           await bumpCommand(
             bumpType,
-            args.runtime,
+            customVersionsToUpdate,
             args.silent,
             args.commit,
             args.tag,
@@ -607,8 +615,10 @@ async function main() {
       .example('$0 bump', 'Bump patch version (default)')
       .example('$0 bump --minor', 'Bump minor version')
       .example('$0 bump --major', 'Bump major version')
+      .example('$0 bump runtime', 'Bump patch and sync runtime version')
+      .example('$0 bump runtime --minor', 'Bump minor and sync runtime')
+      .example('$0 bump runtime pancake', 'Bump and sync multiple versions')
       .example('$0 bump --commit', 'Bump and commit automatically')
-      .example('$0 bump --runtime', 'Bump and update runtime version')
       .example('$0 watch', 'Watch files and auto-regenerate')
       .example('$0 watch --debounce 500', 'Watch with 500ms debounce')
       .example('$0 watch --silent', 'Watch in silent mode')

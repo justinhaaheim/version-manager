@@ -1,4 +1,7 @@
 {
-  "runtimeVersion": "0.1.0",
-  "versionCalculationMode": "append-commits"
+  "versionCalculationMode": "append-commits",
+  "versions": {
+    "runtime": "0.3.1",
+    "pancake": "0.3.1"
+  }
 }

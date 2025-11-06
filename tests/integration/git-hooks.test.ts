@@ -322,8 +322,10 @@ describe('Git Hooks Installation', () => {
         'version-manager.json',
         JSON.stringify(
           {
-            runtimeVersion: '0.1.0',
             versionCalculationMode: 'add-to-patch',
+            versions: {
+              runtime: '0.1.0',
+            },
           },
           null,
           2,
@@ -392,7 +394,7 @@ describe('Git Hooks Installation', () => {
       );
       assertValidVersionJson(version);
       expect(version.dynamicVersion).toBeDefined();
-      expect(version.runtimeVersion).toBe('0.1.0');
+      expect(version.versions.runtime).toBe('0.1.0');
     });
   });
 
@@ -420,8 +422,10 @@ describe('Git Hooks Installation', () => {
         'version-manager.json',
         JSON.stringify(
           {
-            runtimeVersion: '0.1.0',
             versionCalculationMode: 'add-to-patch',
+            versions: {
+              runtime: '0.1.0',
+            },
           },
           null,
           2,
@@ -473,8 +477,10 @@ describe('Git Hooks Installation', () => {
         'version-manager.json',
         JSON.stringify(
           {
-            runtimeVersion: '0.1.0',
             versionCalculationMode: 'add-to-patch',
+            versions: {
+              runtime: '0.1.0',
+            },
           },
           null,
           2,

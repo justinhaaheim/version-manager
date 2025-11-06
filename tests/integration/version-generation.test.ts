@@ -52,7 +52,8 @@ describe('Version Generation', () => {
       assertValidVersionJson(version);
       expect(version.baseVersion).toBe('0.1.0');
       expect(version.dynamicVersion).toBe('0.1.0');
-      expect(version.runtimeVersion).toBe('0.1.0');
+      // No config file means no custom versions
+      expect(version.versions).toEqual({});
     });
   });
 
@@ -68,7 +69,7 @@ describe('Version Generation', () => {
       );
       assertValidVersionJson(version);
       expect(version.dynamicVersion).toBe('0.1.0');
-      expect(version.runtimeVersion).toBe('0.1.0');
+      expect(version.versions.runtime).toBe('0.1.0');
     });
 
     test('adds commits to patch version (5 commits after config)', () => {
@@ -90,7 +91,7 @@ describe('Version Generation', () => {
 
       // With add-to-patch mode, 5 commits after base 0.1.0 → 0.1.5
       assertAddToPatchFormat(version.dynamicVersion, '0.1.0', 5);
-      expect(version.runtimeVersion).toBe('0.1.0');
+      expect(version.versions.runtime).toBe('0.1.0');
     });
 
     test('works with custom base version', () => {
@@ -112,7 +113,7 @@ describe('Version Generation', () => {
 
       // 5 commits after 1.2.3 → 1.2.8
       assertAddToPatchFormat(version.dynamicVersion, '1.2.3', 5);
-      expect(version.runtimeVersion).toBe('1.0.0');
+      expect(version.versions.runtime).toBe('1.0.0');
     });
   });
 
@@ -136,7 +137,7 @@ describe('Version Generation', () => {
 
       // With append-commits mode, 5 commits after 0.1.0 → 0.1.0+5
       assertAppendCommitsFormat(version.dynamicVersion, '0.1.0', 5);
-      expect(version.runtimeVersion).toBe('0.1.0');
+      expect(version.versions.runtime).toBe('0.1.0');
     });
 
     test('returns base version when no commits after config', () => {
@@ -150,7 +151,7 @@ describe('Version Generation', () => {
       );
       assertValidVersionJson(version);
       assertAppendCommitsFormat(version.dynamicVersion, '0.1.0', 0);
-      expect(version.runtimeVersion).toBe('0.1.0');
+      expect(version.versions.runtime).toBe('0.1.0');
     });
   });
 
@@ -210,7 +211,7 @@ describe('Version Generation', () => {
 
       // Code version changes with commits, but runtime stays at config value
       expect(version.dynamicVersion).toBe('0.1.5');
-      expect(version.runtimeVersion).toBe('0.1.0');
+      expect(version.versions.runtime).toBe('0.1.0');
     });
   });
 
@@ -228,7 +229,9 @@ describe('Version Generation', () => {
 
       // Should be valid semver format
       assertSemver(version.dynamicVersion);
-      assertSemver(version.runtimeVersion);
+      if (version.versions.runtime) {
+        assertSemver(version.versions.runtime);
+      }
     });
   });
 

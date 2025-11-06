@@ -44,8 +44,10 @@ export function setupRepoWithVersionConfig(
     'version-manager.json',
     JSON.stringify(
       {
-        runtimeVersion,
         versionCalculationMode,
+        versions: {
+          runtime: runtimeVersion,
+        },
       },
       null,
       2,
@@ -87,8 +89,10 @@ export function setupRepoWithCommitsAfterConfig(
     'version-manager.json',
     JSON.stringify(
       {
-        runtimeVersion,
         versionCalculationMode,
+        versions: {
+          runtime: runtimeVersion,
+        },
       },
       null,
       2,

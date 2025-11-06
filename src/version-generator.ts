@@ -2,8 +2,6 @@ import type {
   DynamicVersion,
   GenerationTrigger,
   VersionCalculationMode,
-  VersionComponents,
-  VersionInfo,
   VersionManagerConfig,
 } from './types';
 
@@ -21,115 +19,34 @@ import {
 import {getPackageVersion} from './script-manager';
 import {VersionManagerConfigSchema} from './types';
 
-function parseGitDescribe(describe: string): VersionComponents | null {
-  const cleanDescribe = describe.replace('-dirty', '');
-  const match = /^v?(\d+\.\d+\.\d+)-(\d+)-g([a-f0-9]+)$/.exec(cleanDescribe);
+/**
+ * Migrate legacy config format to new format
+ * @param config - Config that may have legacy runtimeVersion field
+ * @returns Migrated config with versions object
+ */
+function migrateConfigIfNeeded(config: VersionManagerConfig): {
+  config: VersionManagerConfig;
+  migrated: boolean;
+} {
+  // If already using new format, no migration needed
+  if (config.versions && Object.keys(config.versions).length > 0) {
+    return {config, migrated: false};
+  }
 
-  if (match) {
-    const [, baseVersion, commitsSince, shortHash] = match;
-    return {
-      baseVersion,
-      commitsSince: parseInt(commitsSince, 10),
-      shortHash,
+  // If has legacy runtimeVersion, migrate it
+  if (config.runtimeVersion) {
+    const migratedConfig: VersionManagerConfig = {
+      versionCalculationMode: config.versionCalculationMode,
+      versions: {
+        runtime: config.runtimeVersion,
+      },
     };
+
+    return {config: migratedConfig, migrated: true};
   }
 
-  const tagMatch = /^v?(\d+\.\d+\.\d+)$/.exec(cleanDescribe);
-  if (tagMatch) {
-    const [, version] = tagMatch;
-    return {
-      baseVersion: version,
-      commitsSince: 0,
-      shortHash: '',
-    };
-  }
-
-  const hashMatch = /^([a-f0-9]+)$/.exec(cleanDescribe);
-  if (hashMatch) {
-    return null;
-  }
-
-  return null;
-}
-
-function formatHumanReadable(
-  components: VersionComponents | null,
-  branch: string,
-  dirty: boolean,
-): string {
-  let result = '';
-
-  if (components) {
-    if (components.commitsSince === 0 && !components.shortHash) {
-      result = components.baseVersion;
-    } else {
-      result = `${components.baseVersion}+${components.commitsSince}`;
-    }
-  } else {
-    result = 'untagged';
-  }
-
-  if (branch !== 'main' && branch !== 'master') {
-    result += ` (${branch})`;
-  }
-
-  if (dirty) {
-    result += ' *';
-  }
-
-  return result;
-}
-
-export async function generateVersion(
-  options: {incrementPatch?: boolean} = {},
-): Promise<VersionInfo> {
-  const {incrementPatch = false} = options;
-
-  const isRepo = await isGitRepository();
-  if (!isRepo) {
-    throw new Error(
-      'Not a git repository. Please run this command in a git project.',
-    );
-  }
-
-  const describe = await getGitDescribe();
-  const branch = await getCurrentBranch();
-  const dirty = describe.includes('-dirty');
-
-  const components = parseGitDescribe(describe);
-
-  let version: string;
-  let humanReadable: string;
-
-  if (incrementPatch && components) {
-    const [major, minor, patch] = components.baseVersion.split('.').map(Number);
-    const newPatch = patch + components.commitsSince;
-    version = `${major}.${minor}.${newPatch}`;
-
-    if (branch !== 'main' && branch !== 'master') {
-      const safeBranch = branch.replace(/[^a-zA-Z0-9-]/g, '-').substring(0, 50);
-      version += `-${safeBranch}`;
-    }
-
-    if (dirty) {
-      version += '+dirty';
-    }
-
-    humanReadable = version;
-  } else {
-    humanReadable = formatHumanReadable(components, branch, dirty);
-    version = components ? components.baseVersion : 'unknown';
-  }
-
-  return {
-    branch: branch,
-    components,
-    describe: describe,
-    dirty,
-    humanReadable,
-    timestamp: new Date().toISOString(),
-    version,
-  };
+  // No migration needed
+  return {config, migrated: false};
 }
 
 /**
@@ -215,6 +132,37 @@ function calculateCodeVersion(
 }
 
 /**
+ * Reserved version names that cannot be used
+ */
+const RESERVED_VERSION_NAMES = ['base', 'dynamic', 'build'];
+
+/**
+ * Validate version names in config
+ * @param versions - Versions object from config
+ * @throws Error if any version name is reserved
+ */
+function validateVersionNames(versions: Record<string, unknown>): void {
+  for (const name of Object.keys(versions)) {
+    if (RESERVED_VERSION_NAMES.includes(name.toLowerCase())) {
+      throw new Error(
+        `Version name "${name}" is reserved and cannot be used. Reserved names: ${RESERVED_VERSION_NAMES.join(', ')}`,
+      );
+    }
+  }
+}
+
+/**
+ * Get default version-manager.json configuration
+ * @returns Default VersionManagerConfig object
+ */
+function getDefaultVersionManagerConfig(): VersionManagerConfig {
+  return {
+    versionCalculationMode: 'append-commits',
+    versions: {},
+  };
+}
+
+/**
  * Create default version-manager.json configuration
  * @param configPath - Path to version-manager.json
  * @param silent - Suppress console output
@@ -223,19 +171,16 @@ export function createDefaultVersionManagerConfig(
   configPath: string,
   silent = false,
 ): void {
-  const defaultConfig: VersionManagerConfig = {
-    runtimeVersion: '0.1.0',
-    versionCalculationMode: 'add-to-patch',
-  };
+  const defaultConfig = getDefaultVersionManagerConfig();
 
   writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2) + '\n');
 
   if (!silent) {
     console.log('✅ Created version-manager.json with default values:');
-    console.log(`   runtimeVersion: ${defaultConfig.runtimeVersion}`);
     console.log(
       `   versionCalculationMode: ${defaultConfig.versionCalculationMode}`,
     );
+    console.log(`   versions: {}`);
   }
 }
 
@@ -259,6 +204,17 @@ function generateBuildNumber(): string {
     .padStart(2, '0');
 
   return `${year}${month}${day}.${hours}${minutes}${seconds}.${hundredths}`;
+}
+
+/**
+ * Generate timestamps for version tracking
+ * @returns Object containing human-readable timestamp and Unix timestamp in milliseconds
+ */
+function generateTimestamps(): {timestamp: string; timestampUnix: number} {
+  return {
+    timestamp: new Date().toString(),
+    timestampUnix: Date.now(),
+  };
 }
 
 /**
@@ -292,21 +248,27 @@ export async function generateFileBasedVersion(
     );
   }
 
-  // Read config (will be null if doesn't exist)
-  const config = readVersionManagerConfig(configPath);
+  // Read config from version-manager.json, or use defaults if not found
+  // When config file doesn't exist, falls back to default values:
+  // - versions: {} (no custom versions)
+  // - versionCalculationMode: "append-commits" (explicit, non-magic behavior)
+  let config =
+    readVersionManagerConfig(configPath) ?? getDefaultVersionManagerConfig();
 
-  if (!config) {
-    // Return default version if config doesn't exist (using package.json version)
-    return {
-      baseVersion,
-      branch,
-      buildNumber: generateBuildNumber(),
-      dirty,
-      dynamicVersion: baseVersion,
-      generationTrigger,
-      runtimeVersion: baseVersion,
-      timestamp: new Date().toISOString(),
-    };
+  // Migrate legacy format if needed
+  const {config: migratedConfig, migrated} = migrateConfigIfNeeded(config);
+  config = migratedConfig;
+
+  // Validate version names
+  if (config.versions) {
+    validateVersionNames(config.versions);
+  }
+
+  // Write migrated config back to disk if migration occurred
+  if (migrated && existsSync(configPath)) {
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    console.log('✅ Migrated version-manager.json to new format');
+    console.log('   Moved runtimeVersion to versions.runtime');
   }
 
   // Find last commit where package.json version changed
@@ -343,6 +305,9 @@ export async function generateFileBasedVersion(
     config.versionCalculationMode,
   );
 
+  // Generate timestamps
+  const timestamps = generateTimestamps();
+
   // Build result
   const result: DynamicVersion = {
     baseVersion,
@@ -351,8 +316,9 @@ export async function generateFileBasedVersion(
     dirty,
     dynamicVersion,
     generationTrigger,
-    runtimeVersion: config.runtimeVersion,
-    timestamp: new Date().toISOString(),
+    timestamp: timestamps.timestamp,
+    timestampUnix: timestamps.timestampUnix,
+    versions: config.versions ?? {},
   };
 
   return result;
@@ -369,7 +335,7 @@ export type BumpType = 'major' | 'minor' | 'patch';
 export interface BumpVersionResult {
   newVersion: string;
   oldVersion: string;
-  updatedRuntimeVersion: boolean;
+  updatedVersions: string[]; // Names of custom versions that were updated
 }
 
 /**
@@ -427,15 +393,15 @@ function incrementVersion(version: string, bumpType: BumpType): string | null {
 }
 
 /**
- * Bump the version in package.json
+ * Bump the version in package.json and optionally sync custom versions
  * @param bumpType - Type of bump (major, minor, patch)
- * @param updateRuntime - Whether to also update runtimeVersion to match
+ * @param customVersionsToUpdate - Names of custom versions to sync to new version
  * @param silent - Suppress console output
  * @returns Result with old/new versions
  */
 export async function bumpVersion(
   bumpType: BumpType,
-  updateRuntime = false,
+  customVersionsToUpdate: string[] = [],
   silent = false,
 ): Promise<BumpVersionResult> {
   const configPath = join(process.cwd(), 'version-manager.json');
@@ -454,6 +420,27 @@ export async function bumpVersion(
     throw new Error(
       'No version found in package.json. Please add a "version" field to your package.json.',
     );
+  }
+
+  // Read config
+  let config = readVersionManagerConfig(configPath);
+  if (!config) {
+    throw new Error(
+      'No version-manager.json found. Please run install command first.',
+    );
+  }
+
+  // Migrate if needed
+  const {config: migratedConfig, migrated} = migrateConfigIfNeeded(config);
+  config = migratedConfig;
+
+  // Validate custom version names exist in config
+  for (const versionName of customVersionsToUpdate) {
+    if (!config.versions?.[versionName]) {
+      throw new Error(
+        `Version "${versionName}" not found in version-manager.json. Available versions: ${Object.keys(config.versions ?? {}).join(', ') || 'none'}`,
+      );
+    }
   }
 
   // Generate current computed version to show user what it was
@@ -475,13 +462,19 @@ export async function bumpVersion(
     throw new Error('Failed to update package.json');
   }
 
-  // Update runtime version in config if requested
-  if (updateRuntime) {
-    const config = readVersionManagerConfig(configPath);
-    if (config) {
-      config.runtimeVersion = newVersion;
-      writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+  // Update custom versions in config if requested
+  const updatedVersions: string[] = [];
+  if (customVersionsToUpdate.length > 0 && config.versions) {
+    for (const versionName of customVersionsToUpdate) {
+      config.versions[versionName] = newVersion;
+      updatedVersions.push(versionName);
     }
+
+    // Write updated config (including migration if it occurred)
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+  } else if (migrated) {
+    // Write migrated config even if no custom versions to update
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
   }
 
   if (!silent) {
@@ -489,15 +482,18 @@ export async function bumpVersion(
     console.log(`   Current: ${oldVersion}`);
     console.log(`   New: ${newVersion}`);
     console.log('✅ Updated package.json');
-    if (updateRuntime) {
-      console.log(`   Runtime version: ${newVersion}`);
+    if (updatedVersions.length > 0) {
+      console.log(`   Updated versions: ${updatedVersions.join(', ')}`);
       console.log('✅ Updated version-manager.json');
+    }
+    if (migrated) {
+      console.log('✅ Migrated version-manager.json to new format');
     }
   }
 
   return {
     newVersion,
     oldVersion,
-    updatedRuntimeVersion: updateRuntime,
+    updatedVersions,
   };
 }

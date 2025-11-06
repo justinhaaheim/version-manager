@@ -344,17 +344,17 @@ describe('Watch Command', () => {
       await watcher.waitForReady();
 
       // Update runtime version in config
-      const config = JSON.parse(
-        repo.readFile('version-manager.json'),
-      ) as Record<string, unknown>;
-      config.runtimeVersion = '0.2.0';
+      const config = JSON.parse(repo.readFile('version-manager.json')) as {
+        versions: Record<string, string>;
+      };
+      config.versions.runtime = '0.2.0';
       repo.writeFile('version-manager.json', JSON.stringify(config, null, 2));
 
       // Wait for version file to be regenerated with new runtime version
       const changed = await waitForFileChange(versionFilePath, {
         checkContent: (content) => {
           const version = JSON.parse(content) as DynamicVersion;
-          return version.runtimeVersion === '0.2.0';
+          return version.versions.runtime === '0.2.0';
         },
         timeout: 3000,
       });
@@ -365,7 +365,7 @@ describe('Watch Command', () => {
         fs.readFileSync(versionFilePath, 'utf-8'),
       );
       assertValidVersionJson(version);
-      expect(version.runtimeVersion).toBe('0.2.0');
+      expect(version.versions.runtime).toBe('0.2.0');
     } finally {
       watcher.cleanup();
     }
