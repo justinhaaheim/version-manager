@@ -56,7 +56,7 @@ describe('Git Hooks Installation', () => {
         ),
       );
 
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // Verify Husky was installed
@@ -91,7 +91,7 @@ describe('Git Hooks Installation', () => {
       // Manually create .husky directory (simulate already initialized)
       fs.mkdirSync(path.join(repo.getPath(), '.husky'), {recursive: true});
 
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // Should not have modified package.json dependencies
@@ -111,7 +111,7 @@ describe('Git Hooks Installation', () => {
         JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // Verify Husky was installed (regardless of package manager)
@@ -134,7 +134,7 @@ describe('Git Hooks Installation', () => {
         JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // Verify Husky was installed
@@ -153,7 +153,7 @@ describe('Git Hooks Installation', () => {
         JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // Verify all 4 hooks were created
@@ -170,7 +170,7 @@ describe('Git Hooks Installation', () => {
         JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // Verify hooks are in .husky/, not .git/hooks
@@ -186,7 +186,7 @@ describe('Git Hooks Installation', () => {
         JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // Check executable bit on all hooks
@@ -210,7 +210,7 @@ describe('Git Hooks Installation', () => {
         JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
       expect(result.exitCode).toBe(0);
 
       const hookContent = repo.readHuskyHook('post-commit');
@@ -225,7 +225,9 @@ describe('Git Hooks Installation', () => {
         JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
-      const result = repo.runCli('install --silent --increment-patch');
+      const result = repo.runCli(
+        'install --silent --non-interactive --increment-patch',
+      );
       expect(result.exitCode).toBe(0);
 
       const hookContent = repo.readHuskyHook('post-commit');
@@ -239,7 +241,9 @@ describe('Git Hooks Installation', () => {
         JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
-      const result = repo.runCli('install --silent --no-fail');
+      const result = repo.runCli(
+        'install --silent --non-interactive --no-fail',
+      );
       expect(result.exitCode).toBe(0);
 
       const hookContent = repo.readHuskyHook('post-commit');
@@ -256,7 +260,7 @@ describe('Git Hooks Installation', () => {
       );
 
       // First installation
-      repo.runCli('install --silent');
+      repo.runCli('install --silent --non-interactive');
 
       // Manually add other content to hook
       const hookPath = path.join(repo.getHuskyHooksDir(), 'post-commit');
@@ -266,7 +270,9 @@ describe('Git Hooks Installation', () => {
       fs.writeFileSync(hookPath, newContent);
 
       // Run install again with different flags
-      const result = repo.runCli('install --silent --increment-patch');
+      const result = repo.runCli(
+        'install --silent --non-interactive --increment-patch',
+      );
       expect(result.exitCode).toBe(0);
 
       const updatedContent = repo.readHuskyHook('post-commit');
@@ -284,7 +290,7 @@ describe('Git Hooks Installation', () => {
       );
 
       // First installation without flags
-      repo.runCli('install --silent');
+      repo.runCli('install --silent --non-interactive');
 
       const hookBefore = repo.readHuskyHook('post-commit');
       expect(hookBefore).toContain(
@@ -293,7 +299,9 @@ describe('Git Hooks Installation', () => {
       expect(hookBefore).not.toContain('--increment-patch');
 
       // Second installation with different flags
-      const result = repo.runCli('install --silent --increment-patch');
+      const result = repo.runCli(
+        'install --silent --non-interactive --increment-patch',
+      );
       expect(result.exitCode).toBe(0);
 
       const hookAfter = repo.readHuskyHook('post-commit');
@@ -311,7 +319,7 @@ describe('Git Hooks Installation', () => {
       setupBasicRepo(repo);
 
       // Add .gitignore, package.json, and version-manager.json to avoid prompts
-      repo.writeFile('.gitignore', '*.local.json\n');
+      repo.writeFile('.gitignore', 'dynamic-version.local.json\n');
 
       repo.writeFile(
         'package.json',
@@ -333,7 +341,7 @@ describe('Git Hooks Installation', () => {
       );
 
       // First installation
-      repo.runCli('install --silent');
+      repo.runCli('install --silent --non-interactive');
 
       // Manually duplicate the command in the hook
       const hookPath = path.join(repo.getHuskyHooksDir(), 'post-commit');
@@ -344,7 +352,7 @@ describe('Git Hooks Installation', () => {
       fs.writeFileSync(hookPath, duplicated);
 
       // Run install again (should warn, not modify)
-      const result = repo.runCli('install');
+      const result = repo.runCli('install --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // Output should contain warning about multiple commands
@@ -361,7 +369,7 @@ describe('Git Hooks Installation', () => {
       setupRepoWithVersionConfig(repo, '0.1.0', '0.1.0', 'add-to-patch');
 
       // Add .gitignore to avoid prompts in hook execution
-      repo.writeFile('.gitignore', '*.local.json\n');
+      repo.writeFile('.gitignore', 'dynamic-version.local.json\n');
       repo.makeCommit('Add gitignore');
 
       repo.writeFile(
@@ -370,7 +378,7 @@ describe('Git Hooks Installation', () => {
       );
 
       // Install hooks
-      const installResult = repo.runCli('install --silent');
+      const installResult = repo.runCli('install --silent --non-interactive');
       expect(installResult.exitCode).toBe(0);
 
       // Remove any existing version file
@@ -403,7 +411,7 @@ describe('Git Hooks Installation', () => {
       setupBasicRepo(repo);
 
       // Add .gitignore, package.json, and version-manager.json to avoid prompts
-      repo.writeFile('.gitignore', '*.local.json\n');
+      repo.writeFile('.gitignore', 'dynamic-version.local.json\n');
 
       repo.writeFile(
         'package.json',
@@ -433,12 +441,12 @@ describe('Git Hooks Installation', () => {
       );
 
       // Use non-silent mode so scripts get installed
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // In silent mode, scripts are NOT installed (by design)
       // Let's test with non-silent mode instead
-      const result2 = repo.runCli('install');
+      const result2 = repo.runCli('install --non-interactive');
       expect(result2.exitCode).toBe(0);
 
       const packageJson = JSON.parse(
@@ -455,7 +463,7 @@ describe('Git Hooks Installation', () => {
       setupBasicRepo(repo);
 
       // Add .gitignore, package.json, and version-manager.json to avoid prompts
-      repo.writeFile('.gitignore', '*.local.json\n');
+      repo.writeFile('.gitignore', 'dynamic-version.local.json\n');
 
       repo.writeFile(
         'package.json',
@@ -488,7 +496,7 @@ describe('Git Hooks Installation', () => {
       );
 
       // Use non-silent mode so scripts get installed
-      const result = repo.runCli('install');
+      const result = repo.runCli('install --non-interactive');
       expect(result.exitCode).toBe(0);
 
       const packageJson = JSON.parse(
@@ -510,7 +518,7 @@ describe('Git Hooks Installation', () => {
         JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // Silent mode should produce minimal/no output
@@ -524,7 +532,7 @@ describe('Git Hooks Installation', () => {
         JSON.stringify({name: 'test-project', version: '1.0.0'}, null, 2),
       );
 
-      const result = repo.runCli('install');
+      const result = repo.runCli('install --non-interactive');
       expect(result.exitCode).toBe(0);
 
       // Verbose mode should show progress messages
@@ -554,7 +562,7 @@ describe('Git Hooks Installation', () => {
       );
 
       // Don't create .husky directory - install should fail
-      const result = repo.runCli('install --silent');
+      const result = repo.runCli('install --silent --non-interactive');
 
       // Should fail because .husky directory doesn't exist
       expect(result.exitCode).not.toBe(0);

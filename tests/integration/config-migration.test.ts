@@ -62,10 +62,12 @@ describe('Config Migration', () => {
       expect(version.versions.runtime).toBe('0.5.0');
 
       // Check that config file was migrated
-      const config = JSON.parse(repo.readFile('version-manager.json'));
+      const config = JSON.parse(
+        repo.readFile('version-manager.json'),
+      ) as Record<string, unknown>;
       expect(config.runtimeVersion).toBeUndefined();
       expect(config.versions).toBeDefined();
-      expect(config.versions.runtime).toBe('0.5.0');
+      expect((config.versions as Record<string, string>).runtime).toBe('0.5.0');
       expect(config.versionCalculationMode).toBe('add-to-patch');
     });
 
@@ -148,9 +150,11 @@ describe('Config Migration', () => {
       expect(result.exitCode).toBe(0);
 
       // Verify migration
-      const config = JSON.parse(repo.readFile('version-manager.json'));
+      const config = JSON.parse(
+        repo.readFile('version-manager.json'),
+      ) as Record<string, unknown>;
       expect(config.versions).toBeDefined();
-      expect(config.versions.runtime).toBe('1.5.0');
+      expect((config.versions as Record<string, string>).runtime).toBe('1.5.0');
       expect(config.runtimeVersion).toBeUndefined();
     });
 
@@ -184,9 +188,11 @@ describe('Config Migration', () => {
       expect(result.exitCode).toBe(0);
 
       // Verify migration
-      const config = JSON.parse(repo.readFile('version-manager.json'));
+      const config = JSON.parse(
+        repo.readFile('version-manager.json'),
+      ) as Record<string, unknown>;
       expect(config.versions).toBeDefined();
-      expect(config.versions.runtime).toBe('1.5.0');
+      expect((config.versions as Record<string, string>).runtime).toBe('1.5.0');
       expect(config.runtimeVersion).toBeUndefined();
     });
 
@@ -223,10 +229,13 @@ describe('Config Migration', () => {
       expect(result.exitCode).toBe(0);
 
       // Verify migration preserved custom versions
-      const config = JSON.parse(repo.readFile('version-manager.json'));
-      expect(config.versions.runtime).toBe('2.0.0');
-      expect(config.versions.api).toBe('1.0.0');
-      expect(config.versions.schema).toBe('0.5.0');
+      const config = JSON.parse(
+        repo.readFile('version-manager.json'),
+      ) as Record<string, unknown>;
+      const versions = config.versions as Record<string, string>;
+      expect(versions.runtime).toBe('2.0.0');
+      expect(versions.api).toBe('1.0.0');
+      expect(versions.schema).toBe('0.5.0');
       expect(config.runtimeVersion).toBeUndefined();
     });
   });

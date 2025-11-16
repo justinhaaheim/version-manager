@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
+import {confirm} from '@inquirer/prompts';
 import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
-import * as readline from 'readline';
 import {hideBin} from 'yargs/helpers';
 import yargs from 'yargs/yargs';
 
 import packageJson from '../package.json';
-import {checkGitignore, installGitHooks} from './git-hooks-manager';
+import {installGitHooks} from './git-hooks-manager';
 import {
   addScriptsToPackageJson,
   getConflictingScripts,
@@ -18,25 +18,9 @@ import {
 import {
   type BumpType,
   bumpVersion,
-  createDefaultVersionManagerConfig,
   generateFileBasedVersion,
 } from './version-generator';
 import {startWatcher} from './watcher';
-
-// TODO: Refactor this to use prompts library
-async function promptUser(question: string): Promise<boolean> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  return await new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
-    });
-  });
-}
 
 // Shared options for all commands
 const globalOptions = {
@@ -52,6 +36,13 @@ const globalOptions = {
     hidden: true,
     type: 'boolean' as const,
   },
+  'non-interactive': {
+    alias: 'n',
+    default: false,
+    describe:
+      'Run in non-interactive mode (assumes default responses for all prompts)',
+    type: 'boolean' as const,
+  },
   output: {
     alias: 'o',
     default: './dynamic-version.local.json',
@@ -61,7 +52,7 @@ const globalOptions = {
   silent: {
     alias: 's',
     default: false,
-    describe: 'Suppress console output',
+    describe: 'Suppress console output (informational messages only)',
     type: 'boolean' as const,
   },
 };
@@ -70,29 +61,55 @@ const globalOptions = {
 async function generateVersionFile(
   outputPath: string,
   silent: boolean,
+  nonInteractive: boolean,
   gitHook = false,
 ): Promise<void> {
-  // Check if .local.json is in .gitignore
-  const gitignoreOk = checkGitignore();
-  if (!gitignoreOk && !silent) {
-    console.log('⚠️  Pattern "*.local.json" is not in .gitignore');
-    const shouldAdd = await promptUser('Would you like to add it? (y/n): ');
+  // Check if dynamic-version.local.json is in .gitignore
+  const gitignorePath = join(process.cwd(), '.gitignore');
+  const gitignoreContent = existsSync(gitignorePath)
+    ? readFileSync(gitignorePath, 'utf-8')
+    : '';
+  const hasEntry = gitignoreContent
+    .split('\n')
+    .some((line) => line.trim() === 'dynamic-version.local.json');
 
-    if (shouldAdd) {
-      const gitignorePath = join(process.cwd(), '.gitignore');
-      const content = existsSync(gitignorePath)
-        ? readFileSync(gitignorePath, 'utf-8')
-        : '';
-
+  if (!hasEntry) {
+    // In non-interactive mode OR default mode: add it automatically
+    if (nonInteractive || gitHook) {
+      // Add silently in non-interactive mode
       writeFileSync(
         gitignorePath,
-        content + (content.endsWith('\n') ? '' : '\n') + '*.local.json\n',
+        gitignoreContent +
+          (gitignoreContent.endsWith('\n') || gitignoreContent === ''
+            ? ''
+            : '\n') +
+          'dynamic-version.local.json\n',
       );
-      console.log('✅ Added *.local.json to .gitignore');
-    } else {
-      console.log(
-        '⚠️  Continuing without gitignore update. Be careful not to commit dynamic-version.local.json!',
-      );
+      if (!silent) {
+        console.log('✅ Added dynamic-version.local.json to .gitignore');
+      }
+    } else if (!silent) {
+      // Interactive mode: prompt with default=yes
+      const shouldAdd = await confirm({
+        default: true,
+        message: 'Add dynamic-version.local.json to .gitignore?',
+      });
+
+      if (shouldAdd) {
+        writeFileSync(
+          gitignorePath,
+          gitignoreContent +
+            (gitignoreContent.endsWith('\n') || gitignoreContent === ''
+              ? ''
+              : '\n') +
+            'dynamic-version.local.json\n',
+        );
+        console.log('✅ Added dynamic-version.local.json to .gitignore');
+      } else {
+        console.log(
+          '⚠️  Continuing without gitignore update. Be careful not to commit dynamic-version.local.json!',
+        );
+      }
     }
   }
 
@@ -105,28 +122,11 @@ async function generateVersionFile(
     process.exit(1);
   }
 
-  // Check if version-manager.json exists
-  const versionManagerPath = join(process.cwd(), 'version-manager.json');
-  if (!existsSync(versionManagerPath) && !silent) {
-    console.log('\n⚠️  version-manager.json not found.');
-    const shouldCreate = await promptUser(
-      'Would you like to create it with default values? (y/n): ',
-    );
-
-    if (shouldCreate) {
-      createDefaultVersionManagerConfig(versionManagerPath, silent);
-      console.log(
-        '\n   💡 Tip: The version from package.json will be used as the base version.',
-      );
-      console.log(
-        '        Commit both package.json and version-manager.json to git.',
-      );
-    } else {
-      console.log(
-        '   ℹ️  Continuing without version-manager.json. Using package.json version with default settings.',
-      );
-    }
-  }
+  // Note: version-manager.json is optional
+  // If missing, generateFileBasedVersion() will use default values:
+  // - versionCalculationMode: "append-commits"
+  // - versions: {}
+  // No prompt needed - just use defaults
 
   // Generate version info using file-based approach
   const versionInfo = await generateFileBasedVersion(
@@ -159,12 +159,13 @@ async function installCommand(
   incrementPatch: boolean,
   outputPath: string,
   silent: boolean,
+  nonInteractive: boolean,
   noFail: boolean,
   force: boolean,
   gitHook = false,
 ): Promise<void> {
   // First, generate the version file
-  await generateVersionFile(outputPath, silent, gitHook);
+  await generateVersionFile(outputPath, silent, nonInteractive, gitHook);
 
   if (!silent) {
     console.log('\n📦 Installing git hooks...');
@@ -251,9 +252,10 @@ async function installScriptsCommand(force: boolean): Promise<void> {
 
     let shouldForce = force;
     if (!force) {
-      shouldForce = await promptUser(
-        '\nDo you want to add/update the scripts anyway? (y/N): ',
-      );
+      shouldForce = await confirm({
+        default: false,
+        message: 'Do you want to add/update the scripts anyway?',
+      });
     }
 
     if (!shouldForce) {
@@ -289,7 +291,9 @@ async function installScriptsCommand(force: boolean): Promise<void> {
 async function bumpCommand(
   bumpType: BumpType,
   customVersionsToUpdate: string[],
+  outputPath: string,
   silent: boolean,
+  nonInteractive: boolean,
   commit: boolean,
   tag: boolean,
   push: boolean,
@@ -303,8 +307,7 @@ async function bumpCommand(
   if (!silent) {
     console.log('📝 Regenerating dynamic-version.local.json...');
   }
-  // TODO: We don't need to manually specify the output path here, since this function will automatically use the default
-  await generateVersionFile('./dynamic-version.local.json', silent, gitHook);
+  await generateVersionFile(outputPath, silent, nonInteractive, gitHook);
 
   // Optionally commit
   if (commit) {
@@ -441,7 +444,12 @@ async function main() {
         'Generate version file',
         (yargsInstance) => yargsInstance.options(globalOptions),
         async (args) => {
-          await generateVersionFile(args.output, args.silent, args['git-hook']);
+          await generateVersionFile(
+            args.output,
+            args.silent,
+            args['non-interactive'],
+            args['git-hook'],
+          );
         },
       )
       .command(
@@ -467,6 +475,7 @@ async function main() {
             args['increment-patch'],
             args.output,
             args.silent,
+            args['non-interactive'],
             !args.fail,
             args.force,
             args['git-hook'],
@@ -567,7 +576,9 @@ async function main() {
           await bumpCommand(
             bumpType,
             customVersionsToUpdate,
+            args.output,
             args.silent,
+            args['non-interactive'],
             args.commit,
             args.tag,
             args.push,

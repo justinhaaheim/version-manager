@@ -50,8 +50,12 @@ export function checkGitignore(): boolean {
     if (trimmed === '' || trimmed.startsWith('#')) {
       continue;
     }
-    // Check if this line matches our patterns
-    if (trimmed === '*.local.json' || trimmed === '.local.json') {
+    // Check if this line matches our patterns (new or legacy)
+    if (
+      trimmed === 'dynamic-version.local.json' ||
+      trimmed === '*.local.json' ||
+      trimmed === '.local.json'
+    ) {
       return true;
     }
   }

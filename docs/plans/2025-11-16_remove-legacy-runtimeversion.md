@@ -108,26 +108,32 @@ export const VersionManagerConfigSchema = z.object({
 
 ### Updated Implementation Plan
 
-#### Phase 1: Fix Migration Tests (Current)
+#### Phase 1: Fix Migration Tests ✅ COMPLETE
 
-- Debug why migration isn't writing config file back
-- Get all tests passing
+- ✅ Debugged migration issue - new schema was too permissive
+- ✅ Added `.strict()` to VersionManagerConfigSchema to reject unknown fields
+- ✅ All 5 migration tests passing
+- ✅ All 48 tests passing
+- ✅ Committed: 3a7b331
 
-#### Phase 2: Refactor Interactive Modes
+#### Phase 2: Refactor Interactive Modes ✅ COMPLETE
 
-1. Add `@inquirer/prompts` dependency
-2. Add `--non-interactive` / `-n` flag to globalOptions
-3. Separate `silent` (output) from `nonInteractive` (prompts)
-4. Update `generateVersionFile()`:
-   - Remove config creation prompt entirely
-   - Use defaults if version-manager.json missing
-   - .gitignore: prompt in interactive mode (default=add), warn in non-interactive
-   - Change from `*.local.json` to `dynamic-version.local.json`
-5. Fix hardcoded output path (line 306)
-6. Update `installScriptsCommand()` to use inquirer + handle non-interactive
-7. Update help text for `--non-interactive`
-8. Update tests for new .gitignore pattern
-9. Update documentation
+1. ✅ Add `@inquirer/prompts` dependency
+2. ✅ Add `--non-interactive` / `-n` flag to globalOptions
+3. ✅ Separate `silent` (output) from `nonInteractive` (prompts)
+4. ✅ Update `generateVersionFile()`:
+   - ✅ Remove config creation prompt entirely
+   - ✅ Use defaults if version-manager.json missing
+   - ✅ .gitignore: prompt in interactive mode (default=add), warn in non-interactive
+   - ✅ Change from `*.local.json` to `dynamic-version.local.json`
+5. ✅ Fix hardcoded output path (line 306)
+6. ✅ Update `installScriptsCommand()` to use inquirer + handle non-interactive
+7. ✅ Update help text for `--non-interactive`
+8. ✅ Update tests for new .gitignore pattern (added `--non-interactive` flags)
+9. ✅ Update tests for new .gitignore pattern in fixtures
+10. ✅ Update git-hooks-manager.ts to recognize new pattern
+11. ✅ All 48 tests passing
+12. ✅ All signal checks (TS/lint/prettier) passing
 
 #### Phase 3: Defer
 
