@@ -1,6 +1,7 @@
 import type {
   DynamicVersion,
   GenerationTrigger,
+  LegacyVersionManagerConfig,
   VersionCalculationMode,
   VersionManagerConfig,
 } from './types';
@@ -17,69 +18,70 @@ import {
   readFieldFromCommit,
 } from './git-utils';
 import {getPackageVersion} from './script-manager';
-import {VersionManagerConfigSchema} from './types';
+import {
+  LegacyVersionManagerConfigSchema,
+  VersionManagerConfigSchema,
+} from './types';
 
 /**
  * Migrate legacy config format to new format
- * @param config - Config that may have legacy runtimeVersion field
+ * @param legacyConfig - Legacy config with runtimeVersion field
  * @returns Migrated config with versions object
  */
-function migrateConfigIfNeeded(config: VersionManagerConfig): {
-  config: VersionManagerConfig;
-  migrated: boolean;
-} {
-  // If already using new format, no migration needed
-  if (config.versions && Object.keys(config.versions).length > 0) {
-    return {config, migrated: false};
-  }
+function migrateLegacyConfig(
+  legacyConfig: LegacyVersionManagerConfig,
+): VersionManagerConfig {
+  const versions = {...(legacyConfig.versions ?? {})};
 
-  // If has legacy runtimeVersion, migrate it
-  if (config.runtimeVersion) {
-    const migratedConfig: VersionManagerConfig = {
-      versionCalculationMode: config.versionCalculationMode,
-      versions: {
-        runtime: config.runtimeVersion,
-      },
-    };
+  // Move runtimeVersion to versions.runtime
+  versions.runtime = legacyConfig.runtimeVersion;
 
-    return {config: migratedConfig, migrated: true};
-  }
-
-  // No migration needed
-  return {config, migrated: false};
+  return {
+    versionCalculationMode: legacyConfig.versionCalculationMode,
+    versions,
+  };
 }
 
 /**
- * Read version-manager.json configuration with Zod validation
+ * Read version-manager.json configuration with Zod validation and migration
  * @param configPath - Path to version-manager.json
- * @returns Configuration object or null if not found/invalid
+ * @returns Object with config (or null if not found), and whether migration occurred
  */
-function readVersionManagerConfig(
-  configPath: string,
-): VersionManagerConfig | null {
+function readVersionManagerConfig(configPath: string): {
+  config: VersionManagerConfig | null;
+  migrated: boolean;
+} {
   try {
     if (!existsSync(configPath)) {
-      return null;
+      return {config: null, migrated: false};
     }
 
     const content = readFileSync(configPath, 'utf-8');
     const json: unknown = JSON.parse(content);
 
-    // Use Zod to validate the config
-    const result = VersionManagerConfigSchema.safeParse(json);
-
-    if (!result.success) {
-      console.warn(
-        `⚠️  Invalid version-manager.json format:`,
-        result.error.format(),
-      );
-      return null;
+    // Try parsing with new schema first
+    const newResult = VersionManagerConfigSchema.safeParse(json);
+    if (newResult.success) {
+      return {config: newResult.data, migrated: false};
     }
 
-    return result.data;
+    // Try parsing with legacy schema
+    const legacyResult = LegacyVersionManagerConfigSchema.safeParse(json);
+    if (legacyResult.success) {
+      // Migrate legacy config to new format
+      const migratedConfig = migrateLegacyConfig(legacyResult.data);
+      return {config: migratedConfig, migrated: true};
+    }
+
+    // Neither schema worked - invalid config
+    console.warn(
+      `⚠️  Invalid version-manager.json format:`,
+      newResult.error.format(),
+    );
+    return {config: null, migrated: false};
   } catch (error) {
     console.warn(`⚠️  Failed to read version-manager.json:`, error);
-    return null;
+    return {config: null, migrated: false};
   }
 }
 
@@ -252,12 +254,8 @@ export async function generateFileBasedVersion(
   // When config file doesn't exist, falls back to default values:
   // - versions: {} (no custom versions)
   // - versionCalculationMode: "append-commits" (explicit, non-magic behavior)
-  let config =
-    readVersionManagerConfig(configPath) ?? getDefaultVersionManagerConfig();
-
-  // Migrate legacy format if needed
-  const {config: migratedConfig, migrated} = migrateConfigIfNeeded(config);
-  config = migratedConfig;
+  const {config: rawConfig, migrated} = readVersionManagerConfig(configPath);
+  const config = rawConfig ?? getDefaultVersionManagerConfig();
 
   // Validate version names
   if (config.versions) {
@@ -423,16 +421,13 @@ export async function bumpVersion(
   }
 
   // Read config
-  let config = readVersionManagerConfig(configPath);
-  if (!config) {
+  const {config: rawConfig, migrated} = readVersionManagerConfig(configPath);
+  if (!rawConfig) {
     throw new Error(
       'No version-manager.json found. Please run install command first.',
     );
   }
-
-  // Migrate if needed
-  const {config: migratedConfig, migrated} = migrateConfigIfNeeded(config);
-  config = migratedConfig;
+  const config = rawConfig;
 
   // Validate custom version names exist in config
   for (const versionName of customVersionsToUpdate) {

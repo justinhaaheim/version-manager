@@ -1,4 +1,6 @@
 {
-  "runtimeVersion": "0.1.0",
-  "versionCalculationMode": "append-commits"
+  "versionCalculationMode": "append-commits",
+  "versions": {
+    "runtime": "0.1.0"
+  }
 }

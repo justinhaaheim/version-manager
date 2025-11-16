@@ -1,4 +1,6 @@
 {
-  "runtimeVersion": "0.1.0",
-  "versionCalculationMode": "add-to-patch"
+  "versionCalculationMode": "add-to-patch",
+  "versions": {
+    "runtime": "0.1.0"
+  }
 }
