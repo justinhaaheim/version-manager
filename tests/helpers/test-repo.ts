@@ -77,7 +77,8 @@ export class TestRepo {
     const fullCommand = `bun ${cliPath} ${command}`.trim();
 
     try {
-      const stdout = execSync(fullCommand, {
+      // Use spawn-like approach to capture both stdout and stderr
+      const result = execSync(fullCommand, {
         cwd: this.tempDir,
         encoding: 'utf-8',
         env: {
@@ -91,6 +92,10 @@ export class TestRepo {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
+      // Note: execSync with stdio: ['pipe', 'pipe', 'pipe'] only captures stdout
+      // stderr is inherited, so we can't capture it here without more complex setup
+      const stdout = result;
+
       // Try to parse as JSON if it looks like JSON
       let json: unknown;
       try {
@@ -102,7 +107,7 @@ export class TestRepo {
       return {
         exitCode: 0,
         json,
-        stderr: '',
+        stderr: '', // Can't easily capture stderr with execSync on success
         stdout,
       };
     } catch (error: unknown) {

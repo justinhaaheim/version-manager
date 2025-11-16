@@ -14,10 +14,13 @@ export const LegacyVersionManagerConfigSchema = z.object({
 });
 
 // Current schema - does not accept runtimeVersion
-export const VersionManagerConfigSchema = z.object({
-  versionCalculationMode: VersionCalculationModeSchema,
-  versions: z.record(z.string(), z.string()).default({}),
-});
+// Use .strict() to reject unknown fields like runtimeVersion
+export const VersionManagerConfigSchema = z
+  .object({
+    versionCalculationMode: VersionCalculationModeSchema,
+    versions: z.record(z.string(), z.string()).default({}),
+  })
+  .strict();
 
 export const GenerationTriggerSchema = z.enum(['git-hook', 'cli']);
 
