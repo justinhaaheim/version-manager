@@ -303,6 +303,7 @@ async function bumpCommand(
   if (!silent) {
     console.log('📝 Regenerating dynamic-version.local.json...');
   }
+  // TODO: We don't need to manually specify the output path here, since this function will automatically use the default
   await generateVersionFile('./dynamic-version.local.json', silent, gitHook);
 
   // Optionally commit
@@ -312,16 +313,11 @@ async function bumpCommand(
     }
 
     const {execSync} = await import('child_process');
-    const commitMessage =
-      message ??
-      `Bump version to ${result.newVersion}
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-Co-Authored-By: Claude <noreply@anthropic.com>`;
+    const commitMessage = message ?? `Bump version to ${result.newVersion}`;
 
     try {
       // Stage package.json (always) and version-manager.json (if custom versions were updated)
+      // TODO: Extract these CLI calls to git-utils so we have a function to call for `gitAddPackageJson`, etc instead of manually writing out the commands here
       execSync('git add package.json', {stdio: 'pipe'});
       if (result.updatedVersions.length > 0) {
         execSync('git add version-manager.json', {stdio: 'pipe'});
