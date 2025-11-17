@@ -32,3 +32,4 @@ tmp/
 # Test fixtures (generated files)
 tests/fixtures/git-repos/*.tar.gz
 tests/tmp/
+dynamic-version.local.json
