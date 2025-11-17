@@ -37,9 +37,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const prompts_1 = require("@inquirer/prompts");
 const fs_1 = require("fs");
 const path_1 = require("path");
-const readline = __importStar(require("readline"));
 const helpers_1 = require("yargs/helpers");
 const yargs_1 = __importDefault(require("yargs/yargs"));
 const package_json_1 = __importDefault(require("../package.json"));
@@ -47,19 +47,6 @@ const git_hooks_manager_1 = require("./git-hooks-manager");
 const script_manager_1 = require("./script-manager");
 const version_generator_1 = require("./version-generator");
 const watcher_1 = require("./watcher");
-// TODO: Refactor this to use prompts library
-async function promptUser(question) {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-    });
-    return await new Promise((resolve) => {
-        rl.question(question, (answer) => {
-            rl.close();
-            resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
-        });
-    });
-}
 // Shared options for all commands
 const globalOptions = {
     fail: {
@@ -73,6 +60,12 @@ const globalOptions = {
         hidden: true,
         type: 'boolean',
     },
+    'non-interactive': {
+        alias: 'n',
+        default: false,
+        describe: 'Run in non-interactive mode (assumes default responses for all prompts)',
+        type: 'boolean',
+    },
     output: {
         alias: 'o',
         default: './dynamic-version.local.json',
@@ -82,27 +75,50 @@ const globalOptions = {
     silent: {
         alias: 's',
         default: false,
-        describe: 'Suppress console output',
+        describe: 'Suppress console output (informational messages only)',
         type: 'boolean',
     },
 };
 // Generate version file command
-async function generateVersionFile(outputPath, silent, gitHook = false) {
-    // Check if .local.json is in .gitignore
-    const gitignoreOk = (0, git_hooks_manager_1.checkGitignore)();
-    if (!gitignoreOk && !silent) {
-        console.log('⚠️  Pattern "*.local.json" is not in .gitignore');
-        const shouldAdd = await promptUser('Would you like to add it? (y/n): ');
-        if (shouldAdd) {
-            const gitignorePath = (0, path_1.join)(process.cwd(), '.gitignore');
-            const content = (0, fs_1.existsSync)(gitignorePath)
-                ? (0, fs_1.readFileSync)(gitignorePath, 'utf-8')
-                : '';
-            (0, fs_1.writeFileSync)(gitignorePath, content + (content.endsWith('\n') ? '' : '\n') + '*.local.json\n');
-            console.log('✅ Added *.local.json to .gitignore');
+async function generateVersionFile(outputPath, silent, nonInteractive, gitHook = false) {
+    // Check if dynamic-version.local.json is in .gitignore
+    const gitignorePath = (0, path_1.join)(process.cwd(), '.gitignore');
+    const gitignoreContent = (0, fs_1.existsSync)(gitignorePath)
+        ? (0, fs_1.readFileSync)(gitignorePath, 'utf-8')
+        : '';
+    const hasEntry = gitignoreContent
+        .split('\n')
+        .some((line) => line.trim() === 'dynamic-version.local.json');
+    if (!hasEntry) {
+        // In non-interactive mode OR default mode: add it automatically
+        if (nonInteractive || gitHook) {
+            // Add silently in non-interactive mode
+            (0, fs_1.writeFileSync)(gitignorePath, gitignoreContent +
+                (gitignoreContent.endsWith('\n') || gitignoreContent === ''
+                    ? ''
+                    : '\n') +
+                'dynamic-version.local.json\n');
+            if (!silent) {
+                console.log('✅ Added dynamic-version.local.json to .gitignore');
+            }
         }
-        else {
-            console.log('⚠️  Continuing without gitignore update. Be careful not to commit dynamic-version.local.json!');
+        else if (!silent) {
+            // Interactive mode: prompt with default=yes
+            const shouldAdd = await (0, prompts_1.confirm)({
+                default: true,
+                message: 'Add dynamic-version.local.json to .gitignore?',
+            });
+            if (shouldAdd) {
+                (0, fs_1.writeFileSync)(gitignorePath, gitignoreContent +
+                    (gitignoreContent.endsWith('\n') || gitignoreContent === ''
+                        ? ''
+                        : '\n') +
+                    'dynamic-version.local.json\n');
+                console.log('✅ Added dynamic-version.local.json to .gitignore');
+            }
+            else {
+                console.log('⚠️  Continuing without gitignore update. Be careful not to commit dynamic-version.local.json!');
+            }
         }
     }
     // Check that package.json exists (required)
@@ -111,20 +127,11 @@ async function generateVersionFile(outputPath, silent, gitHook = false) {
         console.error('❌ No package.json found. This tool requires a package.json with a "version" field.');
         process.exit(1);
     }
-    // Check if version-manager.json exists
-    const versionManagerPath = (0, path_1.join)(process.cwd(), 'version-manager.json');
-    if (!(0, fs_1.existsSync)(versionManagerPath) && !silent) {
-        console.log('\n⚠️  version-manager.json not found.');
-        const shouldCreate = await promptUser('Would you like to create it with default values? (y/n): ');
-        if (shouldCreate) {
-            (0, version_generator_1.createDefaultVersionManagerConfig)(versionManagerPath, silent);
-            console.log('\n   💡 Tip: The version from package.json will be used as the base version.');
-            console.log('        Commit both package.json and version-manager.json to git.');
-        }
-        else {
-            console.log('   ℹ️  Continuing without version-manager.json. Using package.json version with default settings.');
-        }
-    }
+    // Note: version-manager.json is optional
+    // If missing, generateFileBasedVersion() will use default values:
+    // - versionCalculationMode: "append-commits"
+    // - versions: {}
+    // No prompt needed - just use defaults
     // Generate version info using file-based approach
     const versionInfo = await (0, version_generator_1.generateFileBasedVersion)(gitHook ? 'git-hook' : 'cli');
     // Write to dynamic-version.local.json
@@ -134,7 +141,9 @@ async function generateVersionFile(outputPath, silent, gitHook = false) {
         console.log(`✅ Version generated:`);
         console.log(`   Base version: ${versionInfo.baseVersion}`);
         console.log(`   Dynamic version: ${versionInfo.dynamicVersion}`);
-        console.log(`   Runtime version: ${versionInfo.runtimeVersion}`);
+        if (Object.keys(versionInfo.versions).length > 0) {
+            console.log(`   Custom versions: ${JSON.stringify(versionInfo.versions, null, 2).replace(/\n/g, '\n   ')}`);
+        }
         if (versionInfo.buildNumber) {
             console.log(`   Build number: ${versionInfo.buildNumber}`);
         }
@@ -142,9 +151,9 @@ async function generateVersionFile(outputPath, silent, gitHook = false) {
     }
 }
 // Install command handler
-async function installCommand(incrementPatch, outputPath, silent, noFail, force, gitHook = false) {
+async function installCommand(incrementPatch, outputPath, silent, nonInteractive, noFail, force, gitHook = false) {
     // First, generate the version file
-    await generateVersionFile(outputPath, silent, gitHook);
+    await generateVersionFile(outputPath, silent, nonInteractive, gitHook);
     if (!silent) {
         console.log('\n📦 Installing git hooks...');
     }
@@ -210,7 +219,10 @@ async function installScriptsCommand(force) {
         }
         let shouldForce = force;
         if (!force) {
-            shouldForce = await promptUser('\nDo you want to add/update the scripts anyway? (y/N): ');
+            shouldForce = await (0, prompts_1.confirm)({
+                default: false,
+                message: 'Do you want to add/update the scripts anyway?',
+            });
         }
         if (!shouldForce) {
             console.log('Script installation cancelled.');
@@ -241,30 +253,26 @@ async function installScriptsCommand(force) {
     }
 }
 // Bump version command handler
-async function bumpCommand(bumpType, updateRuntime, silent, commit, tag, push, message, gitHook = false) {
+async function bumpCommand(bumpType, customVersionsToUpdate, outputPath, silent, nonInteractive, commit, tag, push, message, gitHook = false) {
     // Bump the version
-    const result = await (0, version_generator_1.bumpVersion)(bumpType, updateRuntime, silent);
+    const result = await (0, version_generator_1.bumpVersion)(bumpType, customVersionsToUpdate, silent);
     // Regenerate dynamic version file
     if (!silent) {
         console.log('📝 Regenerating dynamic-version.local.json...');
     }
-    await generateVersionFile('./dynamic-version.local.json', silent, gitHook);
+    await generateVersionFile(outputPath, silent, nonInteractive, gitHook);
     // Optionally commit
     if (commit) {
         if (!silent) {
             console.log('\n📦 Committing changes...');
         }
         const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
-        const commitMessage = message ??
-            `Bump version to ${result.newVersion}
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-Co-Authored-By: Claude <noreply@anthropic.com>`;
+        const commitMessage = message ?? `Bump version to ${result.newVersion}`;
         try {
-            // Stage package.json (always) and version-manager.json (if runtime was updated)
+            // Stage package.json (always) and version-manager.json (if custom versions were updated)
+            // TODO: Extract these CLI calls to git-utils so we have a function to call for `gitAddPackageJson`, etc instead of manually writing out the commands here
             execSync('git add package.json', { stdio: 'pipe' });
-            if (updateRuntime) {
+            if (result.updatedVersions.length > 0) {
                 execSync('git add version-manager.json', { stdio: 'pipe' });
             }
             execSync(`git commit -m '${commitMessage.replace(/'/g, "'\\''")}'`, {
@@ -367,7 +375,7 @@ async function main() {
             .scriptName('npx @justinhaaheim/version-manager')
             .usage('$0 [command]')
             .command('$0', 'Generate version file', (yargsInstance) => yargsInstance.options(globalOptions), async (args) => {
-            await generateVersionFile(args.output, args.silent, args['git-hook']);
+            await generateVersionFile(args.output, args.silent, args['non-interactive'], args['git-hook']);
         })
             .command('install', 'Install git hooks and scripts', (yargsInstance) => yargsInstance.options({
             ...globalOptions,
@@ -382,7 +390,7 @@ async function main() {
                 type: 'boolean',
             },
         }), async (args) => {
-            await installCommand(args['increment-patch'], args.output, args.silent, !args.fail, args.force, args['git-hook']);
+            await installCommand(args['increment-patch'], args.output, args.silent, args['non-interactive'], !args.fail, args.force, args['git-hook']);
         })
             .command('install-scripts', 'Add/update dynamic-version scripts in package.json', (yargsInstance) => yargsInstance.options({
             ...globalOptions,
@@ -394,7 +402,14 @@ async function main() {
         }), async (args) => {
             await installScriptsCommand(args.force);
         })
-            .command('bump', 'Bump version to next major, minor, or patch', (yargsInstance) => yargsInstance.options({
+            .command('bump [versions..]', 'Bump version to next major, minor, or patch', (yargsInstance) => yargsInstance
+            .positional('versions', {
+            array: true,
+            default: [],
+            describe: 'Custom version names to sync (e.g., runtime, pancake)',
+            type: 'string',
+        })
+            .options({
             ...globalOptions,
             commit: {
                 alias: 'c',
@@ -428,12 +443,6 @@ async function main() {
                 describe: 'Push commit and tag to remote (requires --commit)',
                 type: 'boolean',
             },
-            runtime: {
-                alias: 'r',
-                default: false,
-                describe: 'Also update runtimeVersion to match',
-                type: 'boolean',
-            },
             tag: {
                 alias: 't',
                 default: false,
@@ -454,7 +463,9 @@ async function main() {
             else if (args.minor) {
                 bumpType = 'minor';
             }
-            await bumpCommand(bumpType, args.runtime, args.silent, args.commit, args.tag, args.push, args.message, args['git-hook']);
+            // Get custom versions to update from positional args
+            const customVersionsToUpdate = (args.versions ?? []);
+            await bumpCommand(bumpType, customVersionsToUpdate, args.output, args.silent, args['non-interactive'], args.commit, args.tag, args.push, args.message, args['git-hook']);
         })
             .command('watch', 'Watch files and auto-regenerate version on changes', (yargsInstance) => yargsInstance.options({
             ...globalOptions,
@@ -480,8 +491,10 @@ async function main() {
             .example('$0 bump', 'Bump patch version (default)')
             .example('$0 bump --minor', 'Bump minor version')
             .example('$0 bump --major', 'Bump major version')
+            .example('$0 bump runtime', 'Bump patch and sync runtime version')
+            .example('$0 bump runtime --minor', 'Bump minor and sync runtime')
+            .example('$0 bump runtime pancake', 'Bump and sync multiple versions')
             .example('$0 bump --commit', 'Bump and commit automatically')
-            .example('$0 bump --runtime', 'Bump and update runtime version')
             .example('$0 watch', 'Watch files and auto-regenerate')
             .example('$0 watch --debounce 500', 'Watch with 500ms debounce')
             .example('$0 watch --silent', 'Watch in silent mode')

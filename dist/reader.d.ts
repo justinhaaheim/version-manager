@@ -23,7 +23,8 @@ export declare function validateDynamicVersion(version: unknown): {
     dirty: boolean;
     dynamicVersion: string;
     generationTrigger: "git-hook" | "cli";
-    runtimeVersion: string;
     timestamp: string;
+    timestampUnix: number;
+    versions: Record<string, string>;
 };
 //# sourceMappingURL=reader.d.ts.map

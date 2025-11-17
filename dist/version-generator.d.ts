@@ -1,7 +1,4 @@
-import type { DynamicVersion, GenerationTrigger, VersionInfo } from './types';
-export declare function generateVersion(options?: {
-    incrementPatch?: boolean;
-}): Promise<VersionInfo>;
+import type { DynamicVersion, GenerationTrigger } from './types';
 /**
  * Create default version-manager.json configuration
  * @param configPath - Path to version-manager.json
@@ -24,14 +21,14 @@ export type BumpType = 'major' | 'minor' | 'patch';
 export interface BumpVersionResult {
     newVersion: string;
     oldVersion: string;
-    updatedRuntimeVersion: boolean;
+    updatedVersions: string[];
 }
 /**
- * Bump the version in package.json
+ * Bump the version in package.json and optionally sync custom versions
  * @param bumpType - Type of bump (major, minor, patch)
- * @param updateRuntime - Whether to also update runtimeVersion to match
+ * @param customVersionsToUpdate - Names of custom versions to sync to new version
  * @param silent - Suppress console output
  * @returns Result with old/new versions
  */
-export declare function bumpVersion(bumpType: BumpType, updateRuntime?: boolean, silent?: boolean): Promise<BumpVersionResult>;
+export declare function bumpVersion(bumpType: BumpType, customVersionsToUpdate?: string[], silent?: boolean): Promise<BumpVersionResult>;
 //# sourceMappingURL=version-generator.d.ts.map

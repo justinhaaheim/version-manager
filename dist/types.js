@@ -1,37 +1,26 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DynamicVersionSchema = exports.GenerationTriggerSchema = exports.VersionManagerConfigSchema = exports.VersionCalculationModeSchema = exports.GenerateVersionOptionsSchema = exports.VersionInfoSchema = exports.VersionComponentsSchema = void 0;
+exports.DynamicVersionSchema = exports.GenerationTriggerSchema = exports.VersionManagerConfigSchema = exports.LegacyVersionManagerConfigSchema = exports.VersionCalculationModeSchema = void 0;
 const zod_1 = require("zod");
 // Zod schemas for runtime validation
-exports.VersionComponentsSchema = zod_1.z.object({
-    baseVersion: zod_1.z.string(),
-    commitsSince: zod_1.z.number(),
-    shortHash: zod_1.z.string(),
-});
-exports.VersionInfoSchema = zod_1.z.object({
-    branch: zod_1.z.string(),
-    components: exports.VersionComponentsSchema.nullable(),
-    describe: zod_1.z.string(),
-    dirty: zod_1.z.boolean(),
-    error: zod_1.z.boolean().optional(),
-    humanReadable: zod_1.z.string(),
-    timestamp: zod_1.z.string(),
-    version: zod_1.z.string(),
-});
-exports.GenerateVersionOptionsSchema = zod_1.z.object({
-    incrementPatch: zod_1.z.boolean().optional(),
-    outputPath: zod_1.z.string().optional(),
-    silent: zod_1.z.boolean().optional(),
-});
-// New file-based versioning schemas
 exports.VersionCalculationModeSchema = zod_1.z.enum([
     'add-to-patch',
     'append-commits',
 ]);
-exports.VersionManagerConfigSchema = zod_1.z.object({
+// Legacy schema for migration - accepts old runtimeVersion field
+exports.LegacyVersionManagerConfigSchema = zod_1.z.object({
     runtimeVersion: zod_1.z.string(),
     versionCalculationMode: exports.VersionCalculationModeSchema,
+    versions: zod_1.z.record(zod_1.z.string(), zod_1.z.string()).optional(),
 });
+// Current schema - does not accept runtimeVersion
+// Use .strict() to reject unknown fields like runtimeVersion
+exports.VersionManagerConfigSchema = zod_1.z
+    .object({
+    versionCalculationMode: exports.VersionCalculationModeSchema,
+    versions: zod_1.z.record(zod_1.z.string(), zod_1.z.string()).default({}),
+})
+    .strict();
 exports.GenerationTriggerSchema = zod_1.z.enum(['git-hook', 'cli']);
 exports.DynamicVersionSchema = zod_1.z.object({
     baseVersion: zod_1.z.string(),
@@ -40,7 +29,8 @@ exports.DynamicVersionSchema = zod_1.z.object({
     dirty: zod_1.z.boolean(),
     dynamicVersion: zod_1.z.string(),
     generationTrigger: exports.GenerationTriggerSchema,
-    runtimeVersion: zod_1.z.string(),
     timestamp: zod_1.z.string(),
+    timestampUnix: zod_1.z.number(),
+    versions: zod_1.z.record(zod_1.z.string(), zod_1.z.string()).default({}),
 });
 //# sourceMappingURL=types.js.map
