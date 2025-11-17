@@ -19,6 +19,7 @@ import {
   type BumpType,
   bumpVersion,
   generateFileBasedVersion,
+  generateTypeDefinitions,
 } from './version-generator';
 import {startWatcher} from './watcher';
 
@@ -55,6 +56,13 @@ const globalOptions = {
     describe: 'Suppress console output (informational messages only)',
     type: 'boolean' as const,
   },
+  types: {
+    alias: 't',
+    default: true,
+    describe:
+      'Generate TypeScript definition file with explicit version types (use --no-types to disable)',
+    type: 'boolean' as const,
+  },
 };
 
 // Generate version file command
@@ -62,52 +70,64 @@ async function generateVersionFile(
   outputPath: string,
   silent: boolean,
   nonInteractive: boolean,
+  generateTypes: boolean,
   gitHook = false,
 ): Promise<void> {
-  // Check if dynamic-version.local.json is in .gitignore
+  // Check if dynamic-version.local.json and *.local.d.ts are in .gitignore
   const gitignorePath = join(process.cwd(), '.gitignore');
   const gitignoreContent = existsSync(gitignorePath)
     ? readFileSync(gitignorePath, 'utf-8')
     : '';
-  const hasEntry = gitignoreContent
+  const gitignoreLines = gitignoreContent
     .split('\n')
-    .some((line) => line.trim() === 'dynamic-version.local.json');
+    .map((line) => line.trim());
+  const hasJsonEntry = gitignoreLines.includes('dynamic-version.local.json');
+  const hasDtsEntry = gitignoreLines.includes('*.local.d.ts');
 
-  if (!hasEntry) {
+  // Determine what needs to be added
+  const entriesToAdd: string[] = [];
+  if (!hasJsonEntry) {
+    entriesToAdd.push('dynamic-version.local.json');
+  }
+  if (!hasDtsEntry && generateTypes) {
+    entriesToAdd.push('*.local.d.ts');
+  }
+
+  if (entriesToAdd.length > 0) {
     // In non-interactive mode OR default mode: add it automatically
     if (nonInteractive || gitHook) {
       // Add silently in non-interactive mode
-      writeFileSync(
-        gitignorePath,
+      const newContent =
         gitignoreContent +
-          (gitignoreContent.endsWith('\n') || gitignoreContent === ''
-            ? ''
-            : '\n') +
-          'dynamic-version.local.json\n',
-      );
+        (gitignoreContent.endsWith('\n') || gitignoreContent === ''
+          ? ''
+          : '\n') +
+        entriesToAdd.join('\n') +
+        '\n';
+      writeFileSync(gitignorePath, newContent);
       if (!silent) {
-        console.log('✅ Added dynamic-version.local.json to .gitignore');
+        console.log(`✅ Added ${entriesToAdd.join(', ')} to .gitignore`);
       }
     } else if (!silent) {
       // Interactive mode: prompt with default=yes
       const shouldAdd = await confirm({
         default: true,
-        message: 'Add dynamic-version.local.json to .gitignore?',
+        message: `Add ${entriesToAdd.join(', ')} to .gitignore?`,
       });
 
       if (shouldAdd) {
-        writeFileSync(
-          gitignorePath,
+        const newContent =
           gitignoreContent +
-            (gitignoreContent.endsWith('\n') || gitignoreContent === ''
-              ? ''
-              : '\n') +
-            'dynamic-version.local.json\n',
-        );
-        console.log('✅ Added dynamic-version.local.json to .gitignore');
+          (gitignoreContent.endsWith('\n') || gitignoreContent === ''
+            ? ''
+            : '\n') +
+          entriesToAdd.join('\n') +
+          '\n';
+        writeFileSync(gitignorePath, newContent);
+        console.log(`✅ Added ${entriesToAdd.join(', ')} to .gitignore`);
       } else {
         console.log(
-          '⚠️  Continuing without gitignore update. Be careful not to commit dynamic-version.local.json!',
+          `⚠️  Continuing without gitignore update. Be careful not to commit ${entriesToAdd.join(', ')}!`,
         );
       }
     }
@@ -138,6 +158,12 @@ async function generateVersionFile(
     outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
   writeFileSync(finalOutputPath, JSON.stringify(versionInfo, null, 2) + '\n');
 
+  // Generate TypeScript definition file if requested
+  if (generateTypes) {
+    const versionKeys = Object.keys(versionInfo.versions);
+    generateTypeDefinitions(finalOutputPath, versionKeys);
+  }
+
   if (!silent) {
     console.log(`✅ Version generated:`);
     console.log(`   Base version: ${versionInfo.baseVersion}`);
@@ -151,6 +177,10 @@ async function generateVersionFile(
       console.log(`   Build number: ${versionInfo.buildNumber}`);
     }
     console.log(`📝 Written to: ${finalOutputPath}`);
+    if (generateTypes) {
+      const dtsPath = finalOutputPath.replace(/\.json$/, '.d.ts');
+      console.log(`📘 TypeScript definitions: ${dtsPath}`);
+    }
   }
 }
 
@@ -162,10 +192,17 @@ async function installCommand(
   nonInteractive: boolean,
   noFail: boolean,
   force: boolean,
+  generateTypes: boolean,
   gitHook = false,
 ): Promise<void> {
   // First, generate the version file
-  await generateVersionFile(outputPath, silent, nonInteractive, gitHook);
+  await generateVersionFile(
+    outputPath,
+    silent,
+    nonInteractive,
+    generateTypes,
+    gitHook,
+  );
 
   if (!silent) {
     console.log('\n📦 Installing git hooks...');
@@ -294,6 +331,7 @@ async function bumpCommand(
   outputPath: string,
   silent: boolean,
   nonInteractive: boolean,
+  generateTypes: boolean,
   commit: boolean,
   tag: boolean,
   push: boolean,
@@ -307,7 +345,13 @@ async function bumpCommand(
   if (!silent) {
     console.log('📝 Regenerating dynamic-version.local.json...');
   }
-  await generateVersionFile(outputPath, silent, nonInteractive, gitHook);
+  await generateVersionFile(
+    outputPath,
+    silent,
+    nonInteractive,
+    generateTypes,
+    gitHook,
+  );
 
   // Optionally commit
   if (commit) {
@@ -407,6 +451,7 @@ async function watchCommand(
   debounce: number,
   silent: boolean,
   failOnError: boolean,
+  generateTypes: boolean,
 ): Promise<void> {
   if (!silent) {
     console.log('🚀 Starting file watcher...\n');
@@ -415,6 +460,7 @@ async function watchCommand(
   const cleanup = await startWatcher({
     debounce,
     failOnError,
+    generateTypes,
     outputPath,
     silent,
   });
@@ -448,6 +494,7 @@ async function main() {
             args.output,
             args.silent,
             args['non-interactive'],
+            args.types,
             args['git-hook'],
           );
         },
@@ -478,6 +525,7 @@ async function main() {
             args['non-interactive'],
             !args.fail,
             args.force,
+            args.types,
             args['git-hook'],
           );
         },
@@ -579,6 +627,7 @@ async function main() {
             args.output,
             args.silent,
             args['non-interactive'],
+            args.types,
             args.commit,
             args.tag,
             args.push,
@@ -605,6 +654,7 @@ async function main() {
             args.debounce,
             args.silent,
             args.fail,
+            args.types,
           );
         },
       )

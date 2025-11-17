@@ -2,7 +2,10 @@ import chokidar from 'chokidar';
 import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
-import {generateFileBasedVersion} from './version-generator';
+import {
+  generateFileBasedVersion,
+  generateTypeDefinitions,
+} from './version-generator';
 
 /**
  * Options for the file watcher
@@ -12,6 +15,8 @@ export interface WatcherOptions {
   debounce: number;
   /** Exit on errors */
   failOnError: boolean;
+  /** Generate TypeScript definitions */
+  generateTypes: boolean;
   /** Output path for version file */
   outputPath: string;
   /** Suppress console output */
@@ -26,7 +31,7 @@ export interface WatcherOptions {
 export async function startWatcher(
   options: WatcherOptions,
 ): Promise<() => void> {
-  const {outputPath, debounce, silent, failOnError} = options;
+  const {outputPath, debounce, silent, failOnError, generateTypes} = options;
 
   // Track debounce timer
   let debounceTimer: NodeJS.Timeout | null = null;
@@ -49,6 +54,12 @@ export async function startWatcher(
       // Only write if content changed
       if (existingContent !== content) {
         writeFileSync(outputPath, content);
+
+        // Generate TypeScript definitions if requested
+        if (generateTypes) {
+          const versionKeys = Object.keys(versionData.versions);
+          generateTypeDefinitions(outputPath, versionKeys);
+        }
 
         if (!silent) {
           console.log(

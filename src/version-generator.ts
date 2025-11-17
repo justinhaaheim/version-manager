@@ -391,6 +391,39 @@ function incrementVersion(version: string, bumpType: BumpType): string | null {
 }
 
 /**
+ * Generate TypeScript definition file for dynamic version with explicit version types
+ * @param outputPath - Path to the JSON file (will generate .d.ts alongside)
+ * @param versionKeys - Keys from version-manager.json versions object
+ */
+export function generateTypeDefinitions(
+  outputPath: string,
+  versionKeys: string[],
+): void {
+  // Replace .json extension with .d.ts
+  const dtsPath = outputPath.replace(/\.json$/, '.d.ts');
+
+  // Generate versions interface shape
+  const versionsShape =
+    versionKeys.length > 0
+      ? versionKeys.map((key) => `    ${key}: string;`).join('\n')
+      : '    // No custom versions defined in version-manager.json';
+
+  const content = `import type {DynamicVersion} from '@justinhaaheim/version-manager';
+
+export interface DynamicVersionLocal extends Omit<DynamicVersion, 'versions'> {
+  versions: {
+${versionsShape}
+  };
+}
+
+declare const version: DynamicVersionLocal;
+export default version;
+`;
+
+  writeFileSync(dtsPath, content);
+}
+
+/**
  * Bump the version in package.json and optionally sync custom versions
  * @param bumpType - Type of bump (major, minor, patch)
  * @param customVersionsToUpdate - Names of custom versions to sync to new version
