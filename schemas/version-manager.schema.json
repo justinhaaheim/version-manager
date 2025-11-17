@@ -1,0 +1,28 @@
+{
+  "$id": "https://raw.githubusercontent.com/justinhaaheim/version-manager/main/schemas/version-manager.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Configuration file for @justinhaaheim/version-manager - controls version calculation mode and custom version types",
+  "title": "Version Manager Configuration",
+  "type": "object",
+  "properties": {
+    "runtimeVersion": {
+      "type": "string"
+    },
+    "versionCalculationMode": {
+      "type": "string",
+      "enum": ["add-to-patch", "append-commits"]
+    },
+    "versions": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["versionCalculationMode", "versions"],
+  "additionalProperties": false
+}

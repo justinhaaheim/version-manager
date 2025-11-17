@@ -39,7 +39,15 @@ export async function startWatcher(
   const regenerateVersion = async (reason: string): Promise<void> => {
     try {
       const versionData = await generateFileBasedVersion('cli');
-      const content = JSON.stringify(versionData, null, 2) + '\n';
+
+      // Add $schema property for IDE support
+      const versionDataWithSchema = {
+        $schema:
+          './node_modules/@justinhaaheim/version-manager/schemas/dynamic-version.schema.json',
+        ...versionData,
+      };
+
+      const content = JSON.stringify(versionDataWithSchema, null, 2) + '\n';
 
       // Read existing file to check if content changed
       const existingContent = existsSync(outputPath)

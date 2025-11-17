@@ -16,11 +16,13 @@
   },
   "files": [
     "dist",
+    "schemas",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "prebuild": "bun run dynamic-version:generate",
+    "generate-schemas": "bun scripts/generate-schemas.ts",
+    "prebuild": "bun run generate-schemas && bun run dynamic-version:generate",
     "build": "tsc --project tsconfig.build.json",
     "predev": "bun run dynamic-version:generate",
     "dev": "tsc --project tsconfig.build.json --watch",

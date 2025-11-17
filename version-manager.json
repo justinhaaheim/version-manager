@@ -1,4 +1,5 @@
 {
+  "$schema": "./node_modules/@justinhaaheim/version-manager/schemas/version-manager.schema.json",
   "versionCalculationMode": "append-commits",
   "versions": {
     "runtime": "0.3.1",

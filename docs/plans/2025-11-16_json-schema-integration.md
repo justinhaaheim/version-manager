@@ -1,7 +1,7 @@
 # JSON Schema Integration
 
 **Date:** 2025-11-16
-**Status:** Planning
+**Status:** ✅ Complete
 
 ## Goal
 
@@ -72,19 +72,41 @@ Add JSON Schema support for better IDE autocomplete and validation of config fil
 3. Minimal maintenance burden
 4. Well-tested library
 
-## Tasks
+## Implementation Summary
 
-- [ ] Research `zod-to-json-schema` compatibility
-- [ ] Add `zod-to-json-schema` as dev dependency
-- [ ] Create build script to generate JSON Schema files
-- [ ] Store schemas in `/schemas` directory
-- [ ] Update version generation to add `$schema` property to output
-- [ ] Update createDefaultVersionManagerConfig to add `$schema` property
-- [ ] Consider hosting schemas publicly or bundling with package
-- [ ] Update documentation
+### What Was Done
 
-## Questions
+✅ Used Zod 4's native `z.toJSONSchema()` instead of third-party library
+✅ Created `/scripts/generate-schemas.ts` to auto-generate JSON Schema files
+✅ Generated schemas stored in `/schemas` directory
+✅ Added schemas to published package (in `package.json` files array)
+✅ Added `generate-schemas` script to prebuild process
+✅ Added `$schema` property to all generated JSON files:
 
-- Should schemas be included in published package?
-- Should we host schemas on a public URL (like schemastore.org)?
-- Or use relative file paths for `$schema` property?
+- `version-manager.json` (via `writeVersionManagerConfig()` helper)
+- `dynamic-version.local.json` (in CLI, metro-plugin, and watcher)
+
+### Key Decisions
+
+- **No third-party library needed**: Zod 4 has native JSON Schema support
+- **Relative paths for $schema**: `./node_modules/@justinhaaheim/version-manager/schemas/...`
+- **Schemas bundled in package**: Included in npm publish via `files` array
+- **Build-time generation**: Schemas generated before TypeScript compilation
+
+### Files Modified
+
+- `scripts/generate-schemas.ts` - New script to generate schemas
+- `src/version-generator.ts` - Added `writeVersionManagerConfig()` helper
+- `src/index.ts` - Added $schema to dynamic version output
+- `src/metro-plugin.ts` - Added $schema to metro plugin output
+- `src/watcher.ts` - Added $schema to watcher output
+- `package.json` - Added generate-schemas script and schemas to files
+- `tsconfig.json` - Added scripts/\*_/_.ts to includes
+- `version-manager.json` - Added $schema property to this project's config
+
+### Benefits
+
+✅ IDE autocomplete for both config files
+✅ Inline validation errors in VSCode/editors
+✅ Auto-sync with Zod schemas (single source of truth)
+✅ No manual schema maintenance needed
