@@ -1,0 +1,56 @@
+{
+  "$id": "https://raw.githubusercontent.com/justinhaaheim/version-manager/main/schemas/dynamic-version.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Auto-generated version file produced by @justinhaaheim/version-manager - contains computed versions and build metadata",
+  "title": "Dynamic Version Output",
+  "type": "object",
+  "properties": {
+    "baseVersion": {
+      "type": "string"
+    },
+    "branch": {
+      "type": "string"
+    },
+    "buildNumber": {
+      "type": "string"
+    },
+    "dirty": {
+      "type": "boolean"
+    },
+    "dynamicVersion": {
+      "type": "string"
+    },
+    "generationTrigger": {
+      "type": "string",
+      "enum": ["git-hook", "cli"]
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "timestampUnix": {
+      "type": "number"
+    },
+    "versions": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "baseVersion",
+    "branch",
+    "buildNumber",
+    "dirty",
+    "dynamicVersion",
+    "generationTrigger",
+    "timestamp",
+    "timestampUnix",
+    "versions"
+  ],
+  "additionalProperties": false
+}

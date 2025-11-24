@@ -69,7 +69,16 @@ export function withVersionManager(config: MetroConfig): MetroConfig {
         try {
           const outputPath = join(process.cwd(), 'dynamic-version.local.json');
           const newVersionData = await generateFileBasedVersion('cli');
-          const newContent = JSON.stringify(newVersionData, null, 2) + '\n';
+
+          // Add $schema property for IDE support
+          const versionDataWithSchema = {
+            $schema:
+              './node_modules/@justinhaaheim/version-manager/schemas/dynamic-version.schema.json',
+            ...newVersionData,
+          };
+
+          const newContent =
+            JSON.stringify(versionDataWithSchema, null, 2) + '\n';
 
           // Read existing file if it exists
           const existingContent = existsSync(outputPath)

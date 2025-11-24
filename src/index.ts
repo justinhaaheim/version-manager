@@ -153,10 +153,20 @@ async function generateVersionFile(
     gitHook ? 'git-hook' : 'cli',
   );
 
-  // Write to dynamic-version.local.json
+  // Write to dynamic-version.local.json with $schema for IDE support
   const finalOutputPath =
     outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
-  writeFileSync(finalOutputPath, JSON.stringify(versionInfo, null, 2) + '\n');
+
+  const versionInfoWithSchema = {
+    $schema:
+      './node_modules/@justinhaaheim/version-manager/schemas/dynamic-version.schema.json',
+    ...versionInfo,
+  };
+
+  writeFileSync(
+    finalOutputPath,
+    JSON.stringify(versionInfoWithSchema, null, 2) + '\n',
+  );
 
   // Generate TypeScript definition file if requested
   if (generateTypes) {

@@ -165,6 +165,24 @@ function getDefaultVersionManagerConfig(): VersionManagerConfig {
 }
 
 /**
+ * Write version-manager.json with $schema property for IDE support
+ * @param configPath - Path to version-manager.json
+ * @param config - Configuration object to write
+ */
+function writeVersionManagerConfig(
+  configPath: string,
+  config: VersionManagerConfig,
+): void {
+  const configWithSchema = {
+    $schema:
+      './node_modules/@justinhaaheim/version-manager/schemas/version-manager.schema.json',
+    ...config,
+  };
+
+  writeFileSync(configPath, JSON.stringify(configWithSchema, null, 2) + '\n');
+}
+
+/**
  * Create default version-manager.json configuration
  * @param configPath - Path to version-manager.json
  * @param silent - Suppress console output
@@ -175,7 +193,7 @@ export function createDefaultVersionManagerConfig(
 ): void {
   const defaultConfig = getDefaultVersionManagerConfig();
 
-  writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2) + '\n');
+  writeVersionManagerConfig(configPath, defaultConfig);
 
   if (!silent) {
     console.log('✅ Created version-manager.json with default values:');
@@ -264,7 +282,7 @@ export async function generateFileBasedVersion(
 
   // Write migrated config back to disk if migration occurred
   if (migrated && existsSync(configPath)) {
-    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    writeVersionManagerConfig(configPath, config);
     console.log('✅ Migrated version-manager.json to new format');
     console.log('   Moved runtimeVersion to versions.runtime');
   }
@@ -499,10 +517,10 @@ export async function bumpVersion(
     }
 
     // Write updated config (including migration if it occurred)
-    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    writeVersionManagerConfig(configPath, config);
   } else if (migrated) {
     // Write migrated config even if no custom versions to update
-    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    writeVersionManagerConfig(configPath, config);
   }
 
   if (!silent) {
