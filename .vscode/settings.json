@@ -33,7 +33,27 @@
   "typescript.preferences.importModuleSpecifier": "non-relative",
   "javascript.preferences.importModuleSpecifier": "non-relative",
 
-  "colorize.languages": ["javascript", "typescript", "typescriptreact"]
+  "colorize.languages": ["javascript", "typescript", "typescriptreact"],
+  "workbench.colorCustomizations": {
+    "activityBar.activeBackground": "#22ab07",
+    "activityBar.background": "#22ab07",
+    "activityBar.foreground": "#e7e7e7",
+    "activityBar.inactiveForeground": "#e7e7e799",
+    "activityBarBadge.background": "#294af6",
+    "activityBarBadge.foreground": "#e7e7e7",
+    "commandCenter.border": "#e7e7e799",
+    "sash.hoverBorder": "#22ab07",
+    "statusBar.background": "#187a05",
+    "statusBar.foreground": "#e7e7e7",
+    "statusBarItem.hoverBackground": "#22ab07",
+    "statusBarItem.remoteBackground": "#187a05",
+    "statusBarItem.remoteForeground": "#e7e7e7",
+    "titleBar.activeBackground": "#187a05",
+    "titleBar.activeForeground": "#e7e7e7",
+    "titleBar.inactiveBackground": "#187a0599",
+    "titleBar.inactiveForeground": "#e7e7e799"
+  },
+  "peacock.color": "#187a05"
 
   // Eslint stuff:
   // "eslint.debug": true
