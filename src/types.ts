@@ -28,6 +28,7 @@ export const DynamicVersionSchema = z.object({
   baseVersion: z.string(),
   branch: z.string(),
   buildNumber: z.string(),
+  commitsSince: z.number(),
   dirty: z.boolean(),
   dynamicVersion: z.string(),
   generationTrigger: GenerationTriggerSchema,

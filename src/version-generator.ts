@@ -311,6 +311,7 @@ export async function generateFileBasedVersion(
     baseVersion,
     branch,
     buildNumber: generateBuildNumber(),
+    commitsSince,
     dirty,
     dynamicVersion,
     generationTrigger,

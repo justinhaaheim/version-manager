@@ -9,6 +9,11 @@ import yargs from 'yargs/yargs';
 import packageJson from '../package.json';
 import {installGitHooks} from './git-hooks-manager';
 import {
+  formatVersionOutput,
+  type OutputVerbosity,
+  type VersionOutputData,
+} from './output-formatter';
+import {
   addScriptsToPackageJson,
   getConflictingScripts,
   hasExistingDynamicVersionScripts,
@@ -25,6 +30,11 @@ import {startWatcher} from './watcher';
 
 // Shared options for all commands
 const globalOptions = {
+  compact: {
+    default: false,
+    describe: 'Ultra-compact single-line output',
+    type: 'boolean' as const,
+  },
   fail: {
     default: true,
     describe:
@@ -63,16 +73,36 @@ const globalOptions = {
       'Generate TypeScript definition file with explicit version types (use --no-types to disable)',
     type: 'boolean' as const,
   },
+  verbose: {
+    default: false,
+    describe: 'Verbose output with full status dashboard',
+    type: 'boolean' as const,
+  },
 };
+
+/**
+ * Determine output verbosity from CLI flags
+ */
+function getVerbosity(
+  silent: boolean,
+  compact: boolean,
+  verbose: boolean,
+): OutputVerbosity {
+  if (silent) return 'silent';
+  if (compact) return 'compact';
+  if (verbose) return 'verbose';
+  return 'normal';
+}
 
 // Generate version file command
 async function generateVersionFile(
   outputPath: string,
-  silent: boolean,
+  verbosity: OutputVerbosity,
   nonInteractive: boolean,
   generateTypes: boolean,
   gitHook = false,
 ): Promise<void> {
+  const silent = verbosity === 'silent';
   // Check if dynamic-version.local.json and *.local.d.ts are in .gitignore
   const gitignorePath = join(process.cwd(), '.gitignore');
   const gitignoreContent = existsSync(gitignorePath)
@@ -164,23 +194,26 @@ async function generateVersionFile(
     generateTypeDefinitions(finalOutputPath, versionKeys);
   }
 
-  if (!silent) {
-    console.log(`✅ Version generated:`);
-    console.log(`   Base version: ${versionInfo.baseVersion}`);
-    console.log(`   Dynamic version: ${versionInfo.dynamicVersion}`);
-    if (Object.keys(versionInfo.versions).length > 0) {
-      console.log(
-        `   Custom versions: ${JSON.stringify(versionInfo.versions, null, 2).replace(/\n/g, '\n   ')}`,
-      );
-    }
-    if (versionInfo.buildNumber) {
-      console.log(`   Build number: ${versionInfo.buildNumber}`);
-    }
-    console.log(`📝 Written to: ${finalOutputPath}`);
-    if (generateTypes) {
-      const dtsPath = finalOutputPath.replace(/\.json$/, '.d.ts');
-      console.log(`📘 TypeScript definitions: ${dtsPath}`);
-    }
+  // Format and display output based on verbosity
+  if (verbosity !== 'silent') {
+    const dtsPath = generateTypes
+      ? finalOutputPath.replace(/\.json$/, '.d.ts')
+      : undefined;
+
+    const outputData: VersionOutputData = {
+      baseVersion: versionInfo.baseVersion,
+      branch: versionInfo.branch,
+      buildNumber: versionInfo.buildNumber,
+      commitsSince: versionInfo.commitsSince,
+      dirty: versionInfo.dirty,
+      dtsPath,
+      dynamicVersion: versionInfo.dynamicVersion,
+      outputPath: finalOutputPath,
+      versions: versionInfo.versions,
+    };
+
+    const output = formatVersionOutput(outputData, verbosity);
+    console.log(output);
   }
 }
 
@@ -188,17 +221,19 @@ async function generateVersionFile(
 async function installCommand(
   incrementPatch: boolean,
   outputPath: string,
-  silent: boolean,
+  verbosity: OutputVerbosity,
   nonInteractive: boolean,
   noFail: boolean,
   force: boolean,
   generateTypes: boolean,
   gitHook = false,
 ): Promise<void> {
+  const silent = verbosity === 'silent';
+
   // First, generate the version file
   await generateVersionFile(
     outputPath,
-    silent,
+    verbosity,
     nonInteractive,
     generateTypes,
     gitHook,
@@ -329,7 +364,7 @@ async function bumpCommand(
   bumpType: BumpType,
   customVersionsToUpdate: string[],
   outputPath: string,
-  silent: boolean,
+  verbosity: OutputVerbosity,
   nonInteractive: boolean,
   generateTypes: boolean,
   commit: boolean,
@@ -338,6 +373,8 @@ async function bumpCommand(
   message?: string,
   gitHook = false,
 ): Promise<void> {
+  const silent = verbosity === 'silent';
+
   // Bump the version
   const result = await bumpVersion(bumpType, customVersionsToUpdate, silent);
 
@@ -347,7 +384,7 @@ async function bumpCommand(
   }
   await generateVersionFile(
     outputPath,
-    silent,
+    verbosity,
     nonInteractive,
     generateTypes,
     gitHook,
@@ -490,9 +527,14 @@ async function main() {
         'Generate version file',
         (yargsInstance) => yargsInstance.options(globalOptions),
         async (args) => {
+          const verbosity = getVerbosity(
+            args.silent,
+            args.compact,
+            args.verbose,
+          );
           await generateVersionFile(
             args.output,
-            args.silent,
+            verbosity,
             args['non-interactive'],
             args.types,
             args['git-hook'],
@@ -518,10 +560,15 @@ async function main() {
             },
           }),
         async (args) => {
+          const verbosity = getVerbosity(
+            args.silent,
+            args.compact,
+            args.verbose,
+          );
           await installCommand(
             args['increment-patch'],
             args.output,
-            args.silent,
+            verbosity,
             args['non-interactive'],
             !args.fail,
             args.force,
@@ -621,11 +668,16 @@ async function main() {
           // Get custom versions to update from positional args
           const customVersionsToUpdate = (args.versions ?? []) as string[];
 
+          const verbosity = getVerbosity(
+            args.silent,
+            args.compact,
+            args.verbose,
+          );
           await bumpCommand(
             bumpType,
             customVersionsToUpdate,
             args.output,
-            args.silent,
+            verbosity,
             args['non-interactive'],
             args.types,
             args.commit,
