@@ -1,0 +1,75 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`formatVersionOutput compact mode renders single line with version, branch, and checkmark 1`] = `"📦 1.2.3+5 🌿main 💾✓"`;
+
+exports[`formatVersionOutput compact mode shows dirty indicator when dirty 1`] = `"📦 1.2.3+5* 🌿main 💾✓"`;
+
+exports[`formatVersionOutput normal mode renders tree-style output with emojis 1`] = `
+"📦 1.2.3+5 (🌿 main)
+   └─ 📌 1.2.3 + 🔄 5 commits
+   └─ 🏷️  runtime 1.0.0
+   └─ 🔨 20251124.120000.00
+💾 → ./dynamic-version.local.json
+📘 → ./dynamic-version.local.d.ts"
+`;
+
+exports[`formatVersionOutput normal mode shows dirty indicator when dirty 1`] = `
+"📦 1.2.3+5 * (🌿 main)
+   └─ 📌 1.2.3 + 🔄 5 commits
+   └─ 🏷️  runtime 1.0.0
+   └─ 🔨 20251124.120000.00
+💾 → ./dynamic-version.local.json
+📘 → ./dynamic-version.local.d.ts"
+`;
+
+exports[`formatVersionOutput normal mode handles no custom versions 1`] = `
+"📦 1.2.3+5 (🌿 main)
+   └─ 📌 1.2.3 + 🔄 5 commits
+   └─ 🔨 20251124.120000.00
+💾 → ./dynamic-version.local.json
+📘 → ./dynamic-version.local.d.ts"
+`;
+
+exports[`formatVersionOutput verbose mode renders full status dashboard 1`] = `
+"📦 version-manager
+
+   🔢 1.2.3+5
+   ─────────────────────────
+   📌 base      1.2.3
+   🔄 commits   +5
+   🏷️  runtime  1.0.0
+   🌿 branch    main
+   🔨 build     20251124.120000.00
+
+   💾 → ./dynamic-version.local.json
+   📘 → ./dynamic-version.local.d.ts"
+`;
+
+exports[`formatVersionOutput verbose mode shows dirty indicator when dirty 1`] = `
+"📦 version-manager
+
+   🔢 1.2.3+5 *
+   ─────────────────────────
+   📌 base      1.2.3
+   🔄 commits   +5
+   🏷️  runtime  1.0.0
+   🌿 branch    main
+   🔨 build     20251124.120000.00
+
+   💾 → ./dynamic-version.local.json
+   📘 → ./dynamic-version.local.d.ts"
+`;
+
+exports[`formatVersionOutput verbose mode handles no custom versions 1`] = `
+"📦 version-manager
+
+   🔢 1.2.3+5
+   ─────────────────────────
+   📌 base      1.2.3
+   🔄 commits   +5
+   🌿 branch    main
+   🔨 build     20251124.120000.00
+
+   💾 → ./dynamic-version.local.json
+   📘 → ./dynamic-version.local.d.ts"
+`;
