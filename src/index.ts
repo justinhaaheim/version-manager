@@ -82,26 +82,28 @@ const globalOptions = {
 
 /**
  * Determine output verbosity from CLI flags
+ * Returns null if no verbosity flag was specified (allows config to be used as fallback)
  */
 function getVerbosity(
   silent: boolean,
   compact: boolean,
   verbose: boolean,
-): OutputVerbosity {
+): OutputVerbosity | null {
   if (silent) return 'silent';
   if (compact) return 'compact';
   if (verbose) return 'verbose';
-  return 'normal';
+  return null; // No CLI flag specified, use config value
 }
 
 // Generate version file command
 async function generateVersionFile(
   outputPath: string,
-  verbosity: OutputVerbosity,
+  verbosity: OutputVerbosity | null,
   nonInteractive: boolean,
   generateTypes: boolean,
   gitHook = false,
 ): Promise<void> {
+  // Note: verbosity can be null if no CLI flag specified; config value will be used as fallback
   const silent = verbosity === 'silent';
   // Check if dynamic-version.local.json and *.local.d.ts are in .gitignore
   const gitignorePath = join(process.cwd(), '.gitignore');
@@ -179,40 +181,43 @@ async function generateVersionFile(
   // No prompt needed - just use defaults
 
   // Generate version info using file-based approach
-  const versionInfo = await generateFileBasedVersion(
+  const {versionData, configuredVerbosity} = await generateFileBasedVersion(
     gitHook ? 'git-hook' : 'cli',
   );
 
   // Write to dynamic-version.local.json
   const finalOutputPath =
     outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
-  writeFileSync(finalOutputPath, JSON.stringify(versionInfo, null, 2) + '\n');
+  writeFileSync(finalOutputPath, JSON.stringify(versionData, null, 2) + '\n');
 
   // Generate TypeScript definition file if requested
   if (generateTypes) {
-    const versionKeys = Object.keys(versionInfo.versions);
+    const versionKeys = Object.keys(versionData.versions);
     generateTypeDefinitions(finalOutputPath, versionKeys);
   }
 
+  // Use CLI verbosity if specified, otherwise fall back to config, otherwise 'normal'
+  const effectiveVerbosity = verbosity ?? configuredVerbosity ?? 'normal';
+
   // Format and display output based on verbosity
-  if (verbosity !== 'silent') {
+  if (effectiveVerbosity !== 'silent') {
     const dtsPath = generateTypes
       ? finalOutputPath.replace(/\.json$/, '.d.ts')
       : undefined;
 
     const outputData: VersionOutputData = {
-      baseVersion: versionInfo.baseVersion,
-      branch: versionInfo.branch,
-      buildNumber: versionInfo.buildNumber,
-      commitsSince: versionInfo.commitsSince,
-      dirty: versionInfo.dirty,
+      baseVersion: versionData.baseVersion,
+      branch: versionData.branch,
+      buildNumber: versionData.buildNumber,
+      commitsSince: versionData.commitsSince,
+      dirty: versionData.dirty,
       dtsPath,
-      dynamicVersion: versionInfo.dynamicVersion,
+      dynamicVersion: versionData.dynamicVersion,
       outputPath: finalOutputPath,
-      versions: versionInfo.versions,
+      versions: versionData.versions,
     };
 
-    const output = formatVersionOutput(outputData, verbosity);
+    const output = formatVersionOutput(outputData, effectiveVerbosity);
     console.log(output);
   }
 }
@@ -221,7 +226,7 @@ async function generateVersionFile(
 async function installCommand(
   incrementPatch: boolean,
   outputPath: string,
-  verbosity: OutputVerbosity,
+  verbosity: OutputVerbosity | null,
   nonInteractive: boolean,
   noFail: boolean,
   force: boolean,
@@ -364,7 +369,7 @@ async function bumpCommand(
   bumpType: BumpType,
   customVersionsToUpdate: string[],
   outputPath: string,
-  verbosity: OutputVerbosity,
+  verbosity: OutputVerbosity | null,
   nonInteractive: boolean,
   generateTypes: boolean,
   commit: boolean,

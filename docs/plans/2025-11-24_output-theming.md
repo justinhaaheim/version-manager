@@ -133,3 +133,19 @@ All three output modes are now working:
 ### Silent (`--silent`)
 
 No output (existing behavior)
+
+## Config-Based Verbosity
+
+You can set a default output verbosity in `version-manager.json`:
+
+```json
+{
+  "versionCalculationMode": "append-commits",
+  "outputVerbosity": "compact",
+  "versions": {}
+}
+```
+
+Valid values: `"silent"`, `"compact"`, `"normal"`, `"verbose"`
+
+CLI flags (`--silent`, `--compact`, `--verbose`) override the config setting.

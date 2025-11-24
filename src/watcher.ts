@@ -43,7 +43,7 @@ export async function startWatcher(
    */
   const regenerateVersion = async (reason: string): Promise<void> => {
     try {
-      const versionData = await generateFileBasedVersion('cli');
+      const {versionData} = await generateFileBasedVersion('cli');
       const content = JSON.stringify(versionData, null, 2) + '\n';
 
       // Read existing file to check if content changed

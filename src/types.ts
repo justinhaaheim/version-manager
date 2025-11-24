@@ -6,6 +6,13 @@ export const VersionCalculationModeSchema = z.enum([
   'append-commits',
 ]);
 
+export const OutputVerbositySchema = z.enum([
+  'silent',
+  'compact',
+  'normal',
+  'verbose',
+]);
+
 // Legacy schema for migration - accepts old runtimeVersion field
 export const LegacyVersionManagerConfigSchema = z.object({
   runtimeVersion: z.string(),
@@ -17,6 +24,7 @@ export const LegacyVersionManagerConfigSchema = z.object({
 // Use .strict() to reject unknown fields like runtimeVersion
 export const VersionManagerConfigSchema = z
   .object({
+    outputVerbosity: OutputVerbositySchema.optional(),
     versionCalculationMode: VersionCalculationModeSchema,
     versions: z.record(z.string(), z.string()).default({}),
   })

@@ -68,8 +68,8 @@ export function withVersionManager(config: MetroConfig): MetroConfig {
         // Generate version data in memory
         try {
           const outputPath = join(process.cwd(), 'dynamic-version.local.json');
-          const newVersionData = await generateFileBasedVersion('cli');
-          const newContent = JSON.stringify(newVersionData, null, 2) + '\n';
+          const {versionData} = await generateFileBasedVersion('cli');
+          const newContent = JSON.stringify(versionData, null, 2) + '\n';
 
           // Read existing file if it exists
           const existingContent = existsSync(outputPath)

@@ -220,13 +220,23 @@ function generateTimestamps(): {timestamp: string; timestampUnix: number} {
 }
 
 /**
+ * Result from generateFileBasedVersion including config settings
+ */
+export interface GenerateVersionResult {
+  /** Output verbosity from config (if set) */
+  configuredVerbosity: 'silent' | 'compact' | 'normal' | 'verbose' | undefined;
+  /** The generated version data */
+  versionData: DynamicVersion;
+}
+
+/**
  * Generate dynamic version using file-based approach
  * @param generationTrigger - What triggered the version generation
- * @returns DynamicVersion object
+ * @returns GenerateVersionResult with version data and config settings
  */
 export async function generateFileBasedVersion(
   generationTrigger: GenerationTrigger = 'cli',
-): Promise<DynamicVersion> {
+): Promise<GenerateVersionResult> {
   const configPath = join(process.cwd(), 'version-manager.json');
 
   // Check if in git repository
@@ -307,7 +317,7 @@ export async function generateFileBasedVersion(
   const timestamps = generateTimestamps();
 
   // Build result
-  const result: DynamicVersion = {
+  const versionData: DynamicVersion = {
     baseVersion,
     branch,
     buildNumber: generateBuildNumber(),
@@ -320,7 +330,10 @@ export async function generateFileBasedVersion(
     versions: config.versions ?? {},
   };
 
-  return result;
+  return {
+    configuredVerbosity: config.outputVerbosity,
+    versionData,
+  };
 }
 
 /**
@@ -473,7 +486,7 @@ export async function bumpVersion(
   }
 
   // Generate current computed version to show user what it was
-  const currentDynamic = await generateFileBasedVersion();
+  const {versionData: currentDynamic} = await generateFileBasedVersion();
   const oldVersion = currentDynamic.dynamicVersion;
 
   // Increment from the current computed version (not the base)
