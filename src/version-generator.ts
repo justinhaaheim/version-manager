@@ -223,8 +223,8 @@ function generateTimestamps(): {timestamp: string; timestampUnix: number} {
  * Result from generateFileBasedVersion including config settings
  */
 export interface GenerateVersionResult {
-  /** Output verbosity from config (if set) */
-  configuredVerbosity: 'silent' | 'compact' | 'normal' | 'verbose' | undefined;
+  /** Output format from config (if set) */
+  configuredFormat: 'silent' | 'compact' | 'normal' | 'verbose' | undefined;
   /** The generated version data */
   versionData: DynamicVersion;
 }
@@ -331,7 +331,7 @@ export async function generateFileBasedVersion(
   };
 
   return {
-    configuredVerbosity: config.outputVerbosity,
+    configuredFormat: config.outputFormat,
     versionData,
   };
 }

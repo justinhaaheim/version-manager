@@ -134,14 +134,14 @@ All three output modes are now working:
 
 No output (existing behavior)
 
-## Config-Based Verbosity
+## Config-Based Output Format
 
-You can set a default output verbosity in `version-manager.json`:
+You can set a default output format in `version-manager.json`:
 
 ```json
 {
   "versionCalculationMode": "append-commits",
-  "outputVerbosity": "compact",
+  "outputFormat": "compact",
   "versions": {}
 }
 ```
@@ -149,3 +149,20 @@ You can set a default output verbosity in `version-manager.json`:
 Valid values: `"silent"`, `"compact"`, `"normal"`, `"verbose"`
 
 CLI flags (`--silent`, `--compact`, `--verbose`) override the config setting.
+
+## TypeScript Definition Files (.d.ts)
+
+When you import the generated JSON file in TypeScript:
+
+```typescript
+import version from './dynamic-version.local.json';
+```
+
+TypeScript automatically applies the `.d.ts` file if it exists, giving you:
+
+- **Full autocomplete** for all fields
+- **Type safety** for custom versions
+- **Proper typing** instead of `any`
+
+The `.d.ts` file is generated alongside the `.json` file when `--types` is enabled (default).
+The output only shows the `.d.ts` line when types are actually generated.

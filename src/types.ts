@@ -6,7 +6,7 @@ export const VersionCalculationModeSchema = z.enum([
   'append-commits',
 ]);
 
-export const OutputVerbositySchema = z.enum([
+export const OutputFormatSchema = z.enum([
   'silent',
   'compact',
   'normal',
@@ -24,7 +24,7 @@ export const LegacyVersionManagerConfigSchema = z.object({
 // Use .strict() to reject unknown fields like runtimeVersion
 export const VersionManagerConfigSchema = z
   .object({
-    outputVerbosity: OutputVerbositySchema.optional(),
+    outputFormat: OutputFormatSchema.optional(),
     versionCalculationMode: VersionCalculationModeSchema,
     versions: z.record(z.string(), z.string()).default({}),
   })

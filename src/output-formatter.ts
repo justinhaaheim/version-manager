@@ -1,13 +1,14 @@
 /**
  * Output formatting for version-manager CLI
  *
- * Provides three verbosity levels:
+ * Provides four output formats:
  * - verbose: Full status dashboard with section dividers
  * - normal: Tree-style compact but informative (default)
  * - compact: Single line
+ * - silent: No output
  */
 
-export type OutputVerbosity = 'silent' | 'compact' | 'normal' | 'verbose';
+export type OutputFormat = 'silent' | 'compact' | 'normal' | 'verbose';
 
 export interface VersionOutputData {
   baseVersion: string;
@@ -114,13 +115,13 @@ function formatCompact(data: VersionOutputData): string {
 }
 
 /**
- * Format version output based on verbosity level
+ * Format version output based on format type
  */
 export function formatVersionOutput(
   data: VersionOutputData,
-  verbosity: OutputVerbosity,
+  format: OutputFormat,
 ): string {
-  switch (verbosity) {
+  switch (format) {
     case 'silent':
       return '';
     case 'compact':

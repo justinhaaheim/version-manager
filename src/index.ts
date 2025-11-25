@@ -10,7 +10,7 @@ import packageJson from '../package.json';
 import {installGitHooks} from './git-hooks-manager';
 import {
   formatVersionOutput,
-  type OutputVerbosity,
+  type OutputFormat,
   type VersionOutputData,
 } from './output-formatter';
 import {
@@ -81,14 +81,14 @@ const globalOptions = {
 };
 
 /**
- * Determine output verbosity from CLI flags
- * Returns null if no verbosity flag was specified (allows config to be used as fallback)
+ * Determine output format from CLI flags
+ * Returns null if no format flag was specified (allows config to be used as fallback)
  */
-function getVerbosity(
+function getFormat(
   silent: boolean,
   compact: boolean,
   verbose: boolean,
-): OutputVerbosity | null {
+): OutputFormat | null {
   if (silent) return 'silent';
   if (compact) return 'compact';
   if (verbose) return 'verbose';
@@ -98,13 +98,13 @@ function getVerbosity(
 // Generate version file command
 async function generateVersionFile(
   outputPath: string,
-  verbosity: OutputVerbosity | null,
+  format: OutputFormat | null,
   nonInteractive: boolean,
   generateTypes: boolean,
   gitHook = false,
 ): Promise<void> {
-  // Note: verbosity can be null if no CLI flag specified; config value will be used as fallback
-  const silent = verbosity === 'silent';
+  // Note: format can be null if no CLI flag specified; config value will be used as fallback
+  const silent = format === 'silent';
   // Check if dynamic-version.local.json and *.local.d.ts are in .gitignore
   const gitignorePath = join(process.cwd(), '.gitignore');
   const gitignoreContent = existsSync(gitignorePath)
@@ -181,7 +181,7 @@ async function generateVersionFile(
   // No prompt needed - just use defaults
 
   // Generate version info using file-based approach
-  const {versionData, configuredVerbosity} = await generateFileBasedVersion(
+  const {versionData, configuredFormat} = await generateFileBasedVersion(
     gitHook ? 'git-hook' : 'cli',
   );
 
@@ -196,11 +196,11 @@ async function generateVersionFile(
     generateTypeDefinitions(finalOutputPath, versionKeys);
   }
 
-  // Use CLI verbosity if specified, otherwise fall back to config, otherwise 'normal'
-  const effectiveVerbosity = verbosity ?? configuredVerbosity ?? 'normal';
+  // Use CLI format if specified, otherwise fall back to config, otherwise 'normal'
+  const effectiveFormat = format ?? configuredFormat ?? 'normal';
 
-  // Format and display output based on verbosity
-  if (effectiveVerbosity !== 'silent') {
+  // Format and display output based on format
+  if (effectiveFormat !== 'silent') {
     const dtsPath = generateTypes
       ? finalOutputPath.replace(/\.json$/, '.d.ts')
       : undefined;
@@ -217,7 +217,7 @@ async function generateVersionFile(
       versions: versionData.versions,
     };
 
-    const output = formatVersionOutput(outputData, effectiveVerbosity);
+    const output = formatVersionOutput(outputData, effectiveFormat);
     console.log(output);
   }
 }
@@ -226,19 +226,19 @@ async function generateVersionFile(
 async function installCommand(
   incrementPatch: boolean,
   outputPath: string,
-  verbosity: OutputVerbosity | null,
+  format: OutputFormat | null,
   nonInteractive: boolean,
   noFail: boolean,
   force: boolean,
   generateTypes: boolean,
   gitHook = false,
 ): Promise<void> {
-  const silent = verbosity === 'silent';
+  const silent = format === 'silent';
 
   // First, generate the version file
   await generateVersionFile(
     outputPath,
-    verbosity,
+    format,
     nonInteractive,
     generateTypes,
     gitHook,
@@ -369,7 +369,7 @@ async function bumpCommand(
   bumpType: BumpType,
   customVersionsToUpdate: string[],
   outputPath: string,
-  verbosity: OutputVerbosity | null,
+  format: OutputFormat | null,
   nonInteractive: boolean,
   generateTypes: boolean,
   commit: boolean,
@@ -378,7 +378,7 @@ async function bumpCommand(
   message?: string,
   gitHook = false,
 ): Promise<void> {
-  const silent = verbosity === 'silent';
+  const silent = format === 'silent';
 
   // Bump the version
   const result = await bumpVersion(bumpType, customVersionsToUpdate, silent);
@@ -389,7 +389,7 @@ async function bumpCommand(
   }
   await generateVersionFile(
     outputPath,
-    verbosity,
+    format,
     nonInteractive,
     generateTypes,
     gitHook,
@@ -532,14 +532,10 @@ async function main() {
         'Generate version file',
         (yargsInstance) => yargsInstance.options(globalOptions),
         async (args) => {
-          const verbosity = getVerbosity(
-            args.silent,
-            args.compact,
-            args.verbose,
-          );
+          const format = getFormat(args.silent, args.compact, args.verbose);
           await generateVersionFile(
             args.output,
-            verbosity,
+            format,
             args['non-interactive'],
             args.types,
             args['git-hook'],
@@ -565,15 +561,11 @@ async function main() {
             },
           }),
         async (args) => {
-          const verbosity = getVerbosity(
-            args.silent,
-            args.compact,
-            args.verbose,
-          );
+          const format = getFormat(args.silent, args.compact, args.verbose);
           await installCommand(
             args['increment-patch'],
             args.output,
-            verbosity,
+            format,
             args['non-interactive'],
             !args.fail,
             args.force,
@@ -673,16 +665,12 @@ async function main() {
           // Get custom versions to update from positional args
           const customVersionsToUpdate = (args.versions ?? []) as string[];
 
-          const verbosity = getVerbosity(
-            args.silent,
-            args.compact,
-            args.verbose,
-          );
+          const format = getFormat(args.silent, args.compact, args.verbose);
           await bumpCommand(
             bumpType,
             customVersionsToUpdate,
             args.output,
-            verbosity,
+            format,
             args['non-interactive'],
             args.types,
             args.commit,

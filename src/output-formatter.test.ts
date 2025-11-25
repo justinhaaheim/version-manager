@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 
 import {
   formatVersionOutput,
-  type OutputVerbosity,
+  type OutputFormat,
   type VersionOutputData,
 } from './output-formatter';
 
@@ -108,11 +108,8 @@ describe('formatVersionOutput', () => {
   });
 
   describe('default behavior', () => {
-    test('uses normal mode when verbosity is undefined/invalid', () => {
-      const output = formatVersionOutput(
-        sampleData,
-        'invalid' as OutputVerbosity,
-      );
+    test('uses normal mode when format is undefined/invalid', () => {
+      const output = formatVersionOutput(sampleData, 'invalid' as OutputFormat);
       const normalOutput = formatVersionOutput(sampleData, 'normal');
       expect(output).toBe(normalOutput);
     });
