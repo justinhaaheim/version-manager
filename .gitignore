@@ -27,10 +27,11 @@ yarn-error.*
 
 # Temporary files
 tmp/
-*.local.json
+
+# Generated version files
+dynamic-version.local.json
+dynamic-version.local.d.ts
 
 # Test fixtures (generated files)
 tests/fixtures/git-repos/*.tar.gz
 tests/tmp/
-dynamic-version.local.json
-*.local.d.ts

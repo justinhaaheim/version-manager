@@ -105,7 +105,13 @@ async function generateVersionFile(
 ): Promise<void> {
   // Note: format can be null if no CLI flag specified; config value will be used as fallback
   const silent = format === 'silent';
-  // Check if dynamic-version.local.json and *.local.d.ts are in .gitignore
+
+  // Determine the actual output paths based on the outputPath parameter
+  const finalOutputPath =
+    outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
+  const dtsFilename = finalOutputPath.replace(/\.json$/, '.d.ts');
+
+  // Check if our specific generated files are in .gitignore
   const gitignorePath = join(process.cwd(), '.gitignore');
   const gitignoreContent = existsSync(gitignorePath)
     ? readFileSync(gitignorePath, 'utf-8')
@@ -113,16 +119,23 @@ async function generateVersionFile(
   const gitignoreLines = gitignoreContent
     .split('\n')
     .map((line) => line.trim());
-  const hasJsonEntry = gitignoreLines.includes('dynamic-version.local.json');
-  const hasDtsEntry = gitignoreLines.includes('*.local.d.ts');
+
+  // Extract just the filename from the full path for gitignore check
+  const jsonFilename =
+    finalOutputPath.split('/').pop() ?? 'dynamic-version.local.json';
+  const dtsFilenameOnly =
+    dtsFilename.split('/').pop() ?? 'dynamic-version.local.d.ts';
+
+  const hasJsonEntry = gitignoreLines.includes(jsonFilename);
+  const hasDtsEntry = gitignoreLines.includes(dtsFilenameOnly);
 
   // Determine what needs to be added
   const entriesToAdd: string[] = [];
   if (!hasJsonEntry) {
-    entriesToAdd.push('dynamic-version.local.json');
+    entriesToAdd.push(jsonFilename);
   }
   if (!hasDtsEntry && generateTypes) {
-    entriesToAdd.push('*.local.d.ts');
+    entriesToAdd.push(dtsFilenameOnly);
   }
 
   if (entriesToAdd.length > 0) {
@@ -185,9 +198,7 @@ async function generateVersionFile(
     gitHook ? 'git-hook' : 'cli',
   );
 
-  // Write to dynamic-version.local.json
-  const finalOutputPath =
-    outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
+  // Write to output file (finalOutputPath already calculated above for gitignore check)
   writeFileSync(finalOutputPath, JSON.stringify(versionData, null, 2) + '\n');
 
   // Generate TypeScript definition file if requested
