@@ -14,7 +14,7 @@ const version_generator_1 = require("./version-generator");
  * @returns Promise that resolves when watcher is initialized
  */
 async function startWatcher(options) {
-    const { outputPath, debounce, silent, failOnError } = options;
+    const { outputPath, debounce, silent, failOnError, generateTypes } = options;
     // Track debounce timer
     let debounceTimer = null;
     let changesPending = false;
@@ -24,7 +24,7 @@ async function startWatcher(options) {
      */
     const regenerateVersion = async (reason) => {
         try {
-            const versionData = await (0, version_generator_1.generateFileBasedVersion)('cli');
+            const { versionData } = await (0, version_generator_1.generateFileBasedVersion)('cli');
             const content = JSON.stringify(versionData, null, 2) + '\n';
             // Read existing file to check if content changed
             const existingContent = (0, fs_1.existsSync)(outputPath)
@@ -33,6 +33,11 @@ async function startWatcher(options) {
             // Only write if content changed
             if (existingContent !== content) {
                 (0, fs_1.writeFileSync)(outputPath, content);
+                // Generate TypeScript definitions if requested
+                if (generateTypes) {
+                    const versionKeys = Object.keys(versionData.versions);
+                    (0, version_generator_1.generateTypeDefinitions)(outputPath, versionKeys);
+                }
                 if (!silent) {
                     console.log(`✅ Version regenerated (${reason}): ${versionData.dynamicVersion}`);
                 }

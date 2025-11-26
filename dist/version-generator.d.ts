@@ -6,11 +6,20 @@ import type { DynamicVersion, GenerationTrigger } from './types';
  */
 export declare function createDefaultVersionManagerConfig(configPath: string, silent?: boolean): void;
 /**
+ * Result from generateFileBasedVersion including config settings
+ */
+export interface GenerateVersionResult {
+    /** Output format from config (if set) */
+    configuredFormat: 'silent' | 'compact' | 'normal' | 'verbose' | undefined;
+    /** The generated version data */
+    versionData: DynamicVersion;
+}
+/**
  * Generate dynamic version using file-based approach
  * @param generationTrigger - What triggered the version generation
- * @returns DynamicVersion object
+ * @returns GenerateVersionResult with version data and config settings
  */
-export declare function generateFileBasedVersion(generationTrigger?: GenerationTrigger): Promise<DynamicVersion>;
+export declare function generateFileBasedVersion(generationTrigger?: GenerationTrigger): Promise<GenerateVersionResult>;
 /**
  * Bump version type
  */
@@ -23,6 +32,12 @@ export interface BumpVersionResult {
     oldVersion: string;
     updatedVersions: string[];
 }
+/**
+ * Generate TypeScript definition file for dynamic version with explicit version types
+ * @param outputPath - Path to the JSON file (will generate .d.ts alongside)
+ * @param versionKeys - Keys from version-manager.json versions object
+ */
+export declare function generateTypeDefinitions(outputPath: string, versionKeys: string[]): void;
 /**
  * Bump the version in package.json and optionally sync custom versions
  * @param bumpType - Type of bump (major, minor, patch)

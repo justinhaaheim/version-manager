@@ -6,6 +6,8 @@ export interface WatcherOptions {
     debounce: number;
     /** Exit on errors */
     failOnError: boolean;
+    /** Generate TypeScript definitions */
+    generateTypes: boolean;
     /** Output path for version file */
     outputPath: string;
     /** Suppress console output */

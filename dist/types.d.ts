@@ -3,6 +3,12 @@ export declare const VersionCalculationModeSchema: z.ZodEnum<{
     "add-to-patch": "add-to-patch";
     "append-commits": "append-commits";
 }>;
+export declare const OutputFormatSchema: z.ZodEnum<{
+    silent: "silent";
+    compact: "compact";
+    normal: "normal";
+    verbose: "verbose";
+}>;
 export declare const LegacyVersionManagerConfigSchema: z.ZodObject<{
     runtimeVersion: z.ZodString;
     versionCalculationMode: z.ZodEnum<{
@@ -12,6 +18,12 @@ export declare const LegacyVersionManagerConfigSchema: z.ZodObject<{
     versions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
 }, z.core.$strip>;
 export declare const VersionManagerConfigSchema: z.ZodObject<{
+    outputFormat: z.ZodOptional<z.ZodEnum<{
+        silent: "silent";
+        compact: "compact";
+        normal: "normal";
+        verbose: "verbose";
+    }>>;
     versionCalculationMode: z.ZodEnum<{
         "add-to-patch": "add-to-patch";
         "append-commits": "append-commits";
@@ -26,6 +38,7 @@ export declare const DynamicVersionSchema: z.ZodObject<{
     baseVersion: z.ZodString;
     branch: z.ZodString;
     buildNumber: z.ZodString;
+    commitsSince: z.ZodNumber;
     dirty: z.ZodBoolean;
     dynamicVersion: z.ZodString;
     generationTrigger: z.ZodEnum<{

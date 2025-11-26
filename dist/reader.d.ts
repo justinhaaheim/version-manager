@@ -20,6 +20,7 @@ export declare function validateDynamicVersion(version: unknown): {
     baseVersion: string;
     branch: string;
     buildNumber: string;
+    commitsSince: number;
     dirty: boolean;
     dynamicVersion: string;
     generationTrigger: "git-hook" | "cli";

@@ -42,8 +42,8 @@ function withVersionManager(config) {
                 // Generate version data in memory
                 try {
                     const outputPath = (0, path_1.join)(process.cwd(), 'dynamic-version.local.json');
-                    const newVersionData = await (0, version_generator_1.generateFileBasedVersion)('cli');
-                    const newContent = JSON.stringify(newVersionData, null, 2) + '\n';
+                    const { versionData } = await (0, version_generator_1.generateFileBasedVersion)('cli');
+                    const newContent = JSON.stringify(versionData, null, 2) + '\n';
                     // Read existing file if it exists
                     const existingContent = (0, fs_1.existsSync)(outputPath)
                         ? (0, fs_1.readFileSync)(outputPath, 'utf8')

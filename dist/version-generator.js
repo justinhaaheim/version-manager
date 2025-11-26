@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createDefaultVersionManagerConfig = createDefaultVersionManagerConfig;
 exports.generateFileBasedVersion = generateFileBasedVersion;
+exports.generateTypeDefinitions = generateTypeDefinitions;
 exports.bumpVersion = bumpVersion;
 const fs_1 = require("fs");
 const path_1 = require("path");
@@ -198,7 +199,7 @@ function generateTimestamps() {
 /**
  * Generate dynamic version using file-based approach
  * @param generationTrigger - What triggered the version generation
- * @returns DynamicVersion object
+ * @returns GenerateVersionResult with version data and config settings
  */
 async function generateFileBasedVersion(generationTrigger = 'cli') {
     const configPath = (0, path_1.join)(process.cwd(), 'version-manager.json');
@@ -253,10 +254,11 @@ async function generateFileBasedVersion(generationTrigger = 'cli') {
     // Generate timestamps
     const timestamps = generateTimestamps();
     // Build result
-    const result = {
+    const versionData = {
         baseVersion,
         branch,
         buildNumber: generateBuildNumber(),
+        commitsSince,
         dirty,
         dynamicVersion,
         generationTrigger,
@@ -264,7 +266,10 @@ async function generateFileBasedVersion(generationTrigger = 'cli') {
         timestampUnix: timestamps.timestampUnix,
         versions: config.versions ?? {},
     };
-    return result;
+    return {
+        configuredFormat: config.outputFormat,
+        versionData,
+    };
 }
 /**
  * Parse a semver version string into components
@@ -313,6 +318,31 @@ function incrementVersion(version, bumpType) {
     return `${major}.${minor}.${patch}`;
 }
 /**
+ * Generate TypeScript definition file for dynamic version with explicit version types
+ * @param outputPath - Path to the JSON file (will generate .d.ts alongside)
+ * @param versionKeys - Keys from version-manager.json versions object
+ */
+function generateTypeDefinitions(outputPath, versionKeys) {
+    // Replace .json extension with .d.ts
+    const dtsPath = outputPath.replace(/\.json$/, '.d.ts');
+    // Generate versions interface shape
+    const versionsShape = versionKeys.length > 0
+        ? versionKeys.map((key) => `    ${key}: string;`).join('\n')
+        : '    // No custom versions defined in version-manager.json';
+    const content = `import type {DynamicVersion} from '@justinhaaheim/version-manager';
+
+export interface DynamicVersionLocal extends Omit<DynamicVersion, 'versions'> {
+  versions: {
+${versionsShape}
+  };
+}
+
+declare const version: DynamicVersionLocal;
+export default version;
+`;
+    (0, fs_1.writeFileSync)(dtsPath, content);
+}
+/**
  * Bump the version in package.json and optionally sync custom versions
  * @param bumpType - Type of bump (major, minor, patch)
  * @param customVersionsToUpdate - Names of custom versions to sync to new version
@@ -344,7 +374,7 @@ async function bumpVersion(bumpType, customVersionsToUpdate = [], silent = false
         }
     }
     // Generate current computed version to show user what it was
-    const currentDynamic = await generateFileBasedVersion();
+    const { versionData: currentDynamic } = await generateFileBasedVersion();
     const oldVersion = currentDynamic.dynamicVersion;
     // Increment from the current computed version (not the base)
     const newVersion = incrementVersion(oldVersion, bumpType);

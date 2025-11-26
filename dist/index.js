@@ -44,11 +44,17 @@ const helpers_1 = require("yargs/helpers");
 const yargs_1 = __importDefault(require("yargs/yargs"));
 const package_json_1 = __importDefault(require("../package.json"));
 const git_hooks_manager_1 = require("./git-hooks-manager");
+const output_formatter_1 = require("./output-formatter");
 const script_manager_1 = require("./script-manager");
 const version_generator_1 = require("./version-generator");
 const watcher_1 = require("./watcher");
 // Shared options for all commands
 const globalOptions = {
+    compact: {
+        default: false,
+        describe: 'Ultra-compact single-line output',
+        type: 'boolean',
+    },
     fail: {
         default: true,
         describe: 'Exit with error code on failures (use --no-fail to always exit 0)',
@@ -78,46 +84,92 @@ const globalOptions = {
         describe: 'Suppress console output (informational messages only)',
         type: 'boolean',
     },
+    types: {
+        alias: 't',
+        default: true,
+        describe: 'Generate TypeScript definition file with explicit version types (use --no-types to disable)',
+        type: 'boolean',
+    },
+    verbose: {
+        default: false,
+        describe: 'Verbose output with full status dashboard',
+        type: 'boolean',
+    },
 };
+/**
+ * Determine output format from CLI flags
+ * Returns null if no format flag was specified (allows config to be used as fallback)
+ */
+function getFormat(silent, compact, verbose) {
+    if (silent)
+        return 'silent';
+    if (compact)
+        return 'compact';
+    if (verbose)
+        return 'verbose';
+    return null; // No CLI flag specified, use config value
+}
 // Generate version file command
-async function generateVersionFile(outputPath, silent, nonInteractive, gitHook = false) {
-    // Check if dynamic-version.local.json is in .gitignore
+async function generateVersionFile(outputPath, format, nonInteractive, generateTypes, gitHook = false) {
+    // Note: format can be null if no CLI flag specified; config value will be used as fallback
+    const silent = format === 'silent';
+    // Determine the actual output paths based on the outputPath parameter
+    const finalOutputPath = outputPath ?? (0, path_1.join)(process.cwd(), 'dynamic-version.local.json');
+    const dtsFilename = finalOutputPath.replace(/\.json$/, '.d.ts');
+    // Check if our specific generated files are in .gitignore
     const gitignorePath = (0, path_1.join)(process.cwd(), '.gitignore');
     const gitignoreContent = (0, fs_1.existsSync)(gitignorePath)
         ? (0, fs_1.readFileSync)(gitignorePath, 'utf-8')
         : '';
-    const hasEntry = gitignoreContent
+    const gitignoreLines = gitignoreContent
         .split('\n')
-        .some((line) => line.trim() === 'dynamic-version.local.json');
-    if (!hasEntry) {
+        .map((line) => line.trim());
+    // Extract just the filename from the full path for gitignore check
+    const jsonFilename = finalOutputPath.split('/').pop() ?? 'dynamic-version.local.json';
+    const dtsFilenameOnly = dtsFilename.split('/').pop() ?? 'dynamic-version.local.d.ts';
+    const hasJsonEntry = gitignoreLines.includes(jsonFilename);
+    const hasDtsEntry = gitignoreLines.includes(dtsFilenameOnly);
+    // Determine what needs to be added
+    const entriesToAdd = [];
+    if (!hasJsonEntry) {
+        entriesToAdd.push(jsonFilename);
+    }
+    if (!hasDtsEntry && generateTypes) {
+        entriesToAdd.push(dtsFilenameOnly);
+    }
+    if (entriesToAdd.length > 0) {
         // In non-interactive mode OR default mode: add it automatically
         if (nonInteractive || gitHook) {
             // Add silently in non-interactive mode
-            (0, fs_1.writeFileSync)(gitignorePath, gitignoreContent +
+            const newContent = gitignoreContent +
                 (gitignoreContent.endsWith('\n') || gitignoreContent === ''
                     ? ''
                     : '\n') +
-                'dynamic-version.local.json\n');
+                entriesToAdd.join('\n') +
+                '\n';
+            (0, fs_1.writeFileSync)(gitignorePath, newContent);
             if (!silent) {
-                console.log('✅ Added dynamic-version.local.json to .gitignore');
+                console.log(`✅ Added ${entriesToAdd.join(', ')} to .gitignore`);
             }
         }
         else if (!silent) {
             // Interactive mode: prompt with default=yes
             const shouldAdd = await (0, prompts_1.confirm)({
                 default: true,
-                message: 'Add dynamic-version.local.json to .gitignore?',
+                message: `Add ${entriesToAdd.join(', ')} to .gitignore?`,
             });
             if (shouldAdd) {
-                (0, fs_1.writeFileSync)(gitignorePath, gitignoreContent +
+                const newContent = gitignoreContent +
                     (gitignoreContent.endsWith('\n') || gitignoreContent === ''
                         ? ''
                         : '\n') +
-                    'dynamic-version.local.json\n');
-                console.log('✅ Added dynamic-version.local.json to .gitignore');
+                    entriesToAdd.join('\n') +
+                    '\n';
+                (0, fs_1.writeFileSync)(gitignorePath, newContent);
+                console.log(`✅ Added ${entriesToAdd.join(', ')} to .gitignore`);
             }
             else {
-                console.log('⚠️  Continuing without gitignore update. Be careful not to commit dynamic-version.local.json!');
+                console.log(`⚠️  Continuing without gitignore update. Be careful not to commit ${entriesToAdd.join(', ')}!`);
             }
         }
     }
@@ -133,27 +185,41 @@ async function generateVersionFile(outputPath, silent, nonInteractive, gitHook =
     // - versions: {}
     // No prompt needed - just use defaults
     // Generate version info using file-based approach
-    const versionInfo = await (0, version_generator_1.generateFileBasedVersion)(gitHook ? 'git-hook' : 'cli');
-    // Write to dynamic-version.local.json
-    const finalOutputPath = outputPath ?? (0, path_1.join)(process.cwd(), 'dynamic-version.local.json');
-    (0, fs_1.writeFileSync)(finalOutputPath, JSON.stringify(versionInfo, null, 2) + '\n');
-    if (!silent) {
-        console.log(`✅ Version generated:`);
-        console.log(`   Base version: ${versionInfo.baseVersion}`);
-        console.log(`   Dynamic version: ${versionInfo.dynamicVersion}`);
-        if (Object.keys(versionInfo.versions).length > 0) {
-            console.log(`   Custom versions: ${JSON.stringify(versionInfo.versions, null, 2).replace(/\n/g, '\n   ')}`);
-        }
-        if (versionInfo.buildNumber) {
-            console.log(`   Build number: ${versionInfo.buildNumber}`);
-        }
-        console.log(`📝 Written to: ${finalOutputPath}`);
+    const { versionData, configuredFormat } = await (0, version_generator_1.generateFileBasedVersion)(gitHook ? 'git-hook' : 'cli');
+    // Write to output file (finalOutputPath already calculated above for gitignore check)
+    (0, fs_1.writeFileSync)(finalOutputPath, JSON.stringify(versionData, null, 2) + '\n');
+    // Generate TypeScript definition file if requested
+    if (generateTypes) {
+        const versionKeys = Object.keys(versionData.versions);
+        (0, version_generator_1.generateTypeDefinitions)(finalOutputPath, versionKeys);
+    }
+    // Use CLI format if specified, otherwise fall back to config, otherwise 'normal'
+    const effectiveFormat = format ?? configuredFormat ?? 'normal';
+    // Format and display output based on format
+    if (effectiveFormat !== 'silent') {
+        const dtsPath = generateTypes
+            ? finalOutputPath.replace(/\.json$/, '.d.ts')
+            : undefined;
+        const outputData = {
+            baseVersion: versionData.baseVersion,
+            branch: versionData.branch,
+            buildNumber: versionData.buildNumber,
+            commitsSince: versionData.commitsSince,
+            dirty: versionData.dirty,
+            dtsPath,
+            dynamicVersion: versionData.dynamicVersion,
+            outputPath: finalOutputPath,
+            versions: versionData.versions,
+        };
+        const output = (0, output_formatter_1.formatVersionOutput)(outputData, effectiveFormat);
+        console.log(output);
     }
 }
 // Install command handler
-async function installCommand(incrementPatch, outputPath, silent, nonInteractive, noFail, force, gitHook = false) {
+async function installCommand(incrementPatch, outputPath, format, nonInteractive, noFail, force, generateTypes, gitHook = false) {
+    const silent = format === 'silent';
     // First, generate the version file
-    await generateVersionFile(outputPath, silent, nonInteractive, gitHook);
+    await generateVersionFile(outputPath, format, nonInteractive, generateTypes, gitHook);
     if (!silent) {
         console.log('\n📦 Installing git hooks...');
     }
@@ -253,14 +319,15 @@ async function installScriptsCommand(force) {
     }
 }
 // Bump version command handler
-async function bumpCommand(bumpType, customVersionsToUpdate, outputPath, silent, nonInteractive, commit, tag, push, message, gitHook = false) {
+async function bumpCommand(bumpType, customVersionsToUpdate, outputPath, format, nonInteractive, generateTypes, commit, tag, push, message, gitHook = false) {
+    const silent = format === 'silent';
     // Bump the version
     const result = await (0, version_generator_1.bumpVersion)(bumpType, customVersionsToUpdate, silent);
     // Regenerate dynamic version file
     if (!silent) {
         console.log('📝 Regenerating dynamic-version.local.json...');
     }
-    await generateVersionFile(outputPath, silent, nonInteractive, gitHook);
+    await generateVersionFile(outputPath, format, nonInteractive, generateTypes, gitHook);
     // Optionally commit
     if (commit) {
         if (!silent) {
@@ -347,13 +414,14 @@ async function bumpCommand(bumpType, customVersionsToUpdate, outputPath, silent,
     }
 }
 // Watch command handler
-async function watchCommand(outputPath, debounce, silent, failOnError) {
+async function watchCommand(outputPath, debounce, silent, failOnError, generateTypes) {
     if (!silent) {
         console.log('🚀 Starting file watcher...\n');
     }
     const cleanup = await (0, watcher_1.startWatcher)({
         debounce,
         failOnError,
+        generateTypes,
         outputPath,
         silent,
     });
@@ -375,7 +443,8 @@ async function main() {
             .scriptName('npx @justinhaaheim/version-manager')
             .usage('$0 [command]')
             .command('$0', 'Generate version file', (yargsInstance) => yargsInstance.options(globalOptions), async (args) => {
-            await generateVersionFile(args.output, args.silent, args['non-interactive'], args['git-hook']);
+            const format = getFormat(args.silent, args.compact, args.verbose);
+            await generateVersionFile(args.output, format, args['non-interactive'], args.types, args['git-hook']);
         })
             .command('install', 'Install git hooks and scripts', (yargsInstance) => yargsInstance.options({
             ...globalOptions,
@@ -390,7 +459,8 @@ async function main() {
                 type: 'boolean',
             },
         }), async (args) => {
-            await installCommand(args['increment-patch'], args.output, args.silent, args['non-interactive'], !args.fail, args.force, args['git-hook']);
+            const format = getFormat(args.silent, args.compact, args.verbose);
+            await installCommand(args['increment-patch'], args.output, format, args['non-interactive'], !args.fail, args.force, args.types, args['git-hook']);
         })
             .command('install-scripts', 'Add/update dynamic-version scripts in package.json', (yargsInstance) => yargsInstance.options({
             ...globalOptions,
@@ -465,7 +535,8 @@ async function main() {
             }
             // Get custom versions to update from positional args
             const customVersionsToUpdate = (args.versions ?? []);
-            await bumpCommand(bumpType, customVersionsToUpdate, args.output, args.silent, args['non-interactive'], args.commit, args.tag, args.push, args.message, args['git-hook']);
+            const format = getFormat(args.silent, args.compact, args.verbose);
+            await bumpCommand(bumpType, customVersionsToUpdate, args.output, format, args['non-interactive'], args.types, args.commit, args.tag, args.push, args.message, args['git-hook']);
         })
             .command('watch', 'Watch files and auto-regenerate version on changes', (yargsInstance) => yargsInstance.options({
             ...globalOptions,
@@ -475,7 +546,7 @@ async function main() {
                 type: 'number',
             },
         }), async (args) => {
-            await watchCommand(args.output, args.debounce, args.silent, args.fail);
+            await watchCommand(args.output, args.debounce, args.silent, args.fail, args.types);
         })
             .help()
             .alias('help', 'h')
