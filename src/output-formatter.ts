@@ -107,10 +107,23 @@ function formatNormal(data: VersionOutputData): string {
 /**
  * Compact format: Ultra Compact (single line)
  *
- * 📦 0.4.4+2 🌿main 💾✓
+ * For append-commits mode: 📦 0.4.4+2 🌿main 💾✓
+ * For add-to-patch mode:   📦 0.4.6 (0.4.4+2) 🌿main 💾✓
  */
 function formatCompact(data: VersionOutputData): string {
   const dirtyIndicator = data.dirty ? '*' : '';
+
+  // Detect add-to-patch mode: dynamicVersion differs from base and doesn't contain '+'
+  const isAddToPatch =
+    data.dynamicVersion !== data.baseVersion &&
+    !data.dynamicVersion.includes('+') &&
+    data.commitsSince > 0;
+
+  if (isAddToPatch) {
+    // Show derivation for add-to-patch mode: "0.4.6 (0.4.4+2)"
+    return `📦 ${data.dynamicVersion}${dirtyIndicator} (${data.baseVersion}+${data.commitsSince}) 🌿${data.branch} 💾✓`;
+  }
+
   return `📦 ${data.dynamicVersion}${dirtyIndicator} 🌿${data.branch} 💾✓`;
 }
 

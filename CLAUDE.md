@@ -410,19 +410,37 @@ npm run dynamic-version:generate
 
 ## Testing
 
-### Manual Testing
-Use the `test:local` commands to test changes locally before publishing:
+**ALWAYS prefer automated tests over manual testing.** One-off manual tests are not sustainable and don't catch regressions. If you find yourself testing something manually, consider whether that test should be added to the test suite.
+
+### Running Tests
+```bash
+bun test                    # Run all tests
+bun test tests/unit         # Run unit tests only
+bun test tests/integration  # Run integration tests only
+bun test <file>             # Run specific test file
+```
+
+### Test Structure
+- `tests/unit/` - Pure unit tests (no git repos needed)
+  - `output-formatter.test.ts` - Output formatting tests
+  - `git-utils.test.ts` - Git utility function tests
+- `tests/integration/` - Integration tests with temporary git repos
+  - `version-generation.test.ts` - Core version calculation tests
+  - `cli-output.test.ts` - CLI output format tests
+  - `config-migration.test.ts` - Config migration tests
+  - `git-hooks.test.ts` - Hook installation tests (may be flaky)
+  - `watcher.test.ts` - File watcher tests (may be flaky)
+- `tests/helpers/` - Test utilities and fixtures
+- `tests/smoke.test.ts` - Basic infrastructure tests
+
+### Quick Sanity Check (Local)
+Use these commands for quick sanity checks during development:
 ```bash
 bun run test:local           # Test version generation
-bun run test:local:install   # Test full installation
 bun run test:local:help      # Test help output
 ```
 
-### Automated Testing (TODO)
-- Integration tests with temporary git repositories
-- Test both calculation modes
-- Test git hook installation scenarios
-- Test CLI commands and flags
+Note: These are NOT a substitute for proper automated tests.
 
 ## Important General Guidelines
 
