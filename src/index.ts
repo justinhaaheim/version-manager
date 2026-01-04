@@ -8,6 +8,7 @@ import yargs from 'yargs/yargs';
 
 import packageJson from '../package.json';
 import {installGitHooks} from './git-hooks-manager';
+import {isFileTrackedByGit} from './git-utils';
 import {
   formatVersionOutput,
   type OutputFormat,
@@ -95,24 +96,35 @@ function getFormat(
   return null; // No CLI flag specified, use config value
 }
 
-// Generate version file command
-async function generateVersionFile(
-  outputPath: string,
-  format: OutputFormat | null,
-  nonInteractive: boolean,
+/**
+ * Ensure generated files are listed in .gitignore
+ * Only called during install command - never modifies tracked files
+ * @param jsonFilename - The JSON output filename (e.g., "dynamic-version.local.json")
+ * @param dtsFilename - The TypeScript definition filename (e.g., "dynamic-version.local.d.ts")
+ * @param generateTypes - Whether type definitions are being generated
+ * @param nonInteractive - Skip prompts and auto-add entries
+ * @param silent - Suppress console output
+ */
+async function ensureGitignoreEntries(
+  jsonFilename: string,
+  dtsFilename: string,
   generateTypes: boolean,
-  gitHook = false,
+  nonInteractive: boolean,
+  silent: boolean,
 ): Promise<void> {
-  // Note: format can be null if no CLI flag specified; config value will be used as fallback
-  const silent = format === 'silent';
-
-  // Determine the actual output paths based on the outputPath parameter
-  const finalOutputPath =
-    outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
-  const dtsFilename = finalOutputPath.replace(/\.json$/, '.d.ts');
-
-  // Check if our specific generated files are in .gitignore
   const gitignorePath = join(process.cwd(), '.gitignore');
+
+  // Guard: never modify tracked files
+  const isTracked = await isFileTrackedByGit('.gitignore');
+  if (isTracked) {
+    if (!silent) {
+      console.log(
+        `⚠️  Skipping .gitignore update: file is tracked in git. Please add ${jsonFilename}${generateTypes ? ` and ${dtsFilename}` : ''} manually.`,
+      );
+    }
+    return;
+  }
+
   const gitignoreContent = existsSync(gitignorePath)
     ? readFileSync(gitignorePath, 'utf-8')
     : '';
@@ -120,14 +132,8 @@ async function generateVersionFile(
     .split('\n')
     .map((line) => line.trim());
 
-  // Extract just the filename from the full path for gitignore check
-  const jsonFilename =
-    finalOutputPath.split('/').pop() ?? 'dynamic-version.local.json';
-  const dtsFilenameOnly =
-    dtsFilename.split('/').pop() ?? 'dynamic-version.local.d.ts';
-
   const hasJsonEntry = gitignoreLines.includes(jsonFilename);
-  const hasDtsEntry = gitignoreLines.includes(dtsFilenameOnly);
+  const hasDtsEntry = gitignoreLines.includes(dtsFilename);
 
   // Determine what needs to be added
   const entriesToAdd: string[] = [];
@@ -135,13 +141,35 @@ async function generateVersionFile(
     entriesToAdd.push(jsonFilename);
   }
   if (!hasDtsEntry && generateTypes) {
-    entriesToAdd.push(dtsFilenameOnly);
+    entriesToAdd.push(dtsFilename);
   }
 
-  if (entriesToAdd.length > 0) {
-    // In non-interactive mode OR default mode: add it automatically
-    if (nonInteractive || gitHook) {
-      // Add silently in non-interactive mode
+  if (entriesToAdd.length === 0) {
+    return;
+  }
+
+  // In non-interactive mode: add automatically
+  if (nonInteractive) {
+    const newContent =
+      gitignoreContent +
+      (gitignoreContent.endsWith('\n') || gitignoreContent === '' ? '' : '\n') +
+      entriesToAdd.join('\n') +
+      '\n';
+    writeFileSync(gitignorePath, newContent);
+    if (!silent) {
+      console.log(`✅ Added ${entriesToAdd.join(', ')} to .gitignore`);
+    }
+    return;
+  }
+
+  // Interactive mode: prompt with default=yes
+  if (!silent) {
+    const shouldAdd = await confirm({
+      default: true,
+      message: `Add ${entriesToAdd.join(', ')} to .gitignore?`,
+    });
+
+    if (shouldAdd) {
       const newContent =
         gitignoreContent +
         (gitignoreContent.endsWith('\n') || gitignoreContent === ''
@@ -150,33 +178,25 @@ async function generateVersionFile(
         entriesToAdd.join('\n') +
         '\n';
       writeFileSync(gitignorePath, newContent);
-      if (!silent) {
-        console.log(`✅ Added ${entriesToAdd.join(', ')} to .gitignore`);
-      }
-    } else if (!silent) {
-      // Interactive mode: prompt with default=yes
-      const shouldAdd = await confirm({
-        default: true,
-        message: `Add ${entriesToAdd.join(', ')} to .gitignore?`,
-      });
-
-      if (shouldAdd) {
-        const newContent =
-          gitignoreContent +
-          (gitignoreContent.endsWith('\n') || gitignoreContent === ''
-            ? ''
-            : '\n') +
-          entriesToAdd.join('\n') +
-          '\n';
-        writeFileSync(gitignorePath, newContent);
-        console.log(`✅ Added ${entriesToAdd.join(', ')} to .gitignore`);
-      } else {
-        console.log(
-          `⚠️  Continuing without gitignore update. Be careful not to commit ${entriesToAdd.join(', ')}!`,
-        );
-      }
+      console.log(`✅ Added ${entriesToAdd.join(', ')} to .gitignore`);
+    } else {
+      console.log(
+        `⚠️  Continuing without gitignore update. Be careful not to commit ${entriesToAdd.join(', ')}!`,
+      );
     }
   }
+}
+
+// Generate version file command
+async function generateVersionFile(
+  outputPath: string,
+  format: OutputFormat | null,
+  generateTypes: boolean,
+  gitHook = false,
+): Promise<void> {
+  // Determine the actual output paths based on the outputPath parameter
+  const finalOutputPath =
+    outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
 
   // Check that package.json exists (required)
   const packageJsonPath = join(process.cwd(), 'package.json');
@@ -207,8 +227,8 @@ async function generateVersionFile(
     generateTypeDefinitions(finalOutputPath, versionKeys);
   }
 
-  // Use CLI format if specified, otherwise fall back to config, otherwise 'normal'
-  const effectiveFormat = format ?? configuredFormat ?? 'normal';
+  // Use CLI format if specified, otherwise fall back to config, otherwise 'compact'
+  const effectiveFormat = format ?? configuredFormat ?? 'compact';
 
   // Format and display output based on format
   if (effectiveFormat !== 'silent') {
@@ -246,14 +266,28 @@ async function installCommand(
 ): Promise<void> {
   const silent = format === 'silent';
 
-  // First, generate the version file
-  await generateVersionFile(
-    outputPath,
-    format,
-    nonInteractive,
+  // Determine filenames for gitignore check
+  const finalOutputPath =
+    outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
+  const jsonFilename =
+    finalOutputPath.split('/').pop() ?? 'dynamic-version.local.json';
+  const dtsFilename =
+    finalOutputPath
+      .replace(/\.json$/, '.d.ts')
+      .split('/')
+      .pop() ?? 'dynamic-version.local.d.ts';
+
+  // Ensure generated files are in .gitignore (only during install)
+  await ensureGitignoreEntries(
+    jsonFilename,
+    dtsFilename,
     generateTypes,
-    gitHook,
+    nonInteractive || gitHook,
+    silent,
   );
+
+  // Generate the version file
+  await generateVersionFile(outputPath, format, generateTypes, gitHook);
 
   if (!silent) {
     console.log('\n📦 Installing git hooks...');
@@ -398,13 +432,7 @@ async function bumpCommand(
   if (!silent) {
     console.log('📝 Regenerating dynamic-version.local.json...');
   }
-  await generateVersionFile(
-    outputPath,
-    format,
-    nonInteractive,
-    generateTypes,
-    gitHook,
-  );
+  await generateVersionFile(outputPath, format, generateTypes, gitHook);
 
   // Optionally commit
   if (commit) {
@@ -547,7 +575,6 @@ async function main() {
           await generateVersionFile(
             args.output,
             format,
-            args['non-interactive'],
             args.types,
             args['git-hook'],
           );
@@ -735,6 +762,12 @@ async function main() {
       .example('$0 watch', 'Watch files and auto-regenerate')
       .example('$0 watch --debounce 500', 'Watch with 500ms debounce')
       .example('$0 watch --silent', 'Watch in silent mode')
+      .epilog(
+        `Output verbosity:
+  (default)   Single-line summary
+  --verbose   Full status dashboard with details
+  --silent    No output (for scripts/hooks)`,
+      )
       .strict()
       .parseAsync();
 
