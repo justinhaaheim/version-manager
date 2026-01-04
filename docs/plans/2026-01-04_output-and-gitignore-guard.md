@@ -1,7 +1,7 @@
 # Output Defaults & Gitignore Guard
 
 **Date:** 2026-01-04
-**Status:** In Progress
+**Status:** Complete
 
 ## Goals
 
@@ -10,64 +10,42 @@
 3. Add guard: never modify files that aren't gitignored; print warnings instead
 4. Improve help menu to make output format flags more discoverable
 
-## Problem Analysis
+## Implementation Summary
 
-### Issue 1: Default Output Too Verbose
+### Step 1: Change Default Output Format ✅
 
-- Current default: `normal` format (multi-line tree-style)
-- Desired default: `compact` format (single line)
-- Flags exist: `--compact`, `--verbose`, `--silent`
+- Changed fallback in `generateVersionFile()` from `'normal'` to `'compact'`
+- Output now defaults to single-line: `📦 0.4.6+1 🌿main 💾✓`
 
-### Issue 2: Gitignore Modified Outside Install
+### Step 2: Move Gitignore Logic to Install Only ✅
 
-Location: `src/index.ts` `generateVersionFile()` function (lines 115-179)
+- Extracted gitignore check/update logic from `generateVersionFile()` into new `ensureGitignoreEntries()` function
+- Only called from `installCommand()`, not from `generateVersionFile()`
+- `generateVersionFile()` now focuses solely on generating the version file
 
-- The gitignore check/update logic runs on EVERY command including the default generate command
-- This caused issues during a rebase because every checkout was modifying .gitignore
-- Should only happen during `install` command
+### Step 3: Add Guard for Tracked Files ✅
 
-### Issue 3: No Guard Against Modifying Tracked Files
+- Added `isFileTrackedByGit(filepath)` utility to `git-utils.ts`
+- `ensureGitignoreEntries()` checks if .gitignore is tracked before modifying
+- If tracked, prints warning: `⚠️  Skipping .gitignore update: file is tracked in git. Please add [files] manually.`
 
-- Currently the tool can modify .gitignore even if it's a tracked file
-- This is dangerous during rebases, merges, etc.
-- Need to check if a file is gitignored before modifying it
-- If not gitignored, print a warning and skip the modification
+### Step 4: Improve Help Menu ✅
 
-## Implementation Plan
+- Added epilog to yargs:
+  ```
+  Output verbosity:
+    (default)   Single-line summary
+    --verbose   Full status dashboard with details
+    --silent    No output (for scripts/hooks)
+  ```
 
-### Step 1: Change Default Output Format
+## Files Modified
 
-- [x] In `output-formatter.ts`, the formats are already defined correctly
-- [x] In `index.ts`, change the default format from `null` (falling back to config or 'normal') to `'compact'`
-- Actually: Keep CLI default as null, but change the fallback in `generateVersionFile()` from 'normal' to 'compact'
+1. `src/index.ts` - Extracted gitignore logic, added guard, changed default format
+2. `src/git-utils.ts` - Added `isFileTrackedByGit()` function
 
-### Step 2: Move Gitignore Logic to Install Only
+## Testing Done
 
-- [ ] Extract gitignore check/update logic from `generateVersionFile()` into a separate function
-- [ ] Only call this function from `installCommand()`, not from `generateVersionFile()`
-- [ ] The `generateVersionFile()` function should focus solely on generating the version file
-
-### Step 3: Add Guard for Tracked Files
-
-- [ ] Create a utility function `isFileGitignored(filepath)` in `git-utils.ts`
-- [ ] Before modifying any file (like .gitignore), check if it's gitignored
-- [ ] If the file we want to modify is NOT gitignored (i.e., it's tracked), print a warning and skip
-- [ ] Warning format: `⚠️  Skipping update to [filename]: file is tracked in git`
-
-### Step 4: Improve Help Menu
-
-- [ ] Add descriptive epilog to yargs showing output format examples
-- [ ] Make `--verbose` more prominent in help
-
-## Files to Modify
-
-1. `src/index.ts` - Move gitignore logic, add guard
-2. `src/git-utils.ts` - Add `isFileGitignored()` function
-3. `src/output-formatter.ts` - No changes needed (formats already correct)
-
-## Testing
-
-- Run `bun run test:local` to verify compact output is default
-- Run `bun run test:local --verbose` to verify verbose still works
-- During a rebase, verify no files are modified by the generate command
-- Verify install command still works and updates gitignore appropriately
+- `bun run test:local` shows compact single-line output
+- `bun run test:local --verbose` shows full dashboard
+- Signal check passes (ts-check, lint, prettier)
