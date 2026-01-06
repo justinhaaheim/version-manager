@@ -33,8 +33,9 @@ describe('CLI Output Format', () => {
       const result = repo.runCli('');
       expect(result.exitCode).toBe(0);
 
-      // Should show: 📦 0.4.6+2 🌿main 💾✓
-      expect(result.stdout).toContain('📦 0.4.6+2');
+      // Should show: Dynamic version: 0.4.6+2 🌿main 💾✓
+      expect(result.stdout).toContain('Dynamic version:');
+      expect(result.stdout).toContain('0.4.6+2');
       expect(result.stdout).toContain('🌿');
       expect(result.stdout).toContain('💾✓');
       // Should NOT show derivation in parens for append-commits
@@ -53,8 +54,9 @@ describe('CLI Output Format', () => {
       const result = repo.runCli('');
       expect(result.exitCode).toBe(0);
 
-      // Should show: 📦 0.4.8 (0.4.6+2) 🌿main 💾✓
-      expect(result.stdout).toContain('📦 0.4.8');
+      // Should show: Dynamic version: 0.4.8 (0.4.6+2) 🌿main 💾✓
+      expect(result.stdout).toContain('Dynamic version:');
+      expect(result.stdout).toContain('0.4.8');
       expect(result.stdout).toContain('(0.4.6+2)');
       expect(result.stdout).toContain('💾✓');
     });
@@ -78,8 +80,9 @@ describe('CLI Output Format', () => {
       const result = repo.runCli('');
       expect(result.exitCode).toBe(0);
 
-      // Should just show: 📦 0.4.6 🌿main 💾✓
-      expect(result.stdout).toContain('📦 0.4.6');
+      // Should show: Dynamic version: 0.4.6 🌿main 💾✓
+      expect(result.stdout).toContain('Dynamic version:');
+      expect(result.stdout).toContain('0.4.6');
       // Should NOT show derivation in parens when no commits
       expect(result.stdout).not.toContain('(');
     });

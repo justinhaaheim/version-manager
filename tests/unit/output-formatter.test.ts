@@ -29,7 +29,7 @@ describe('Output Formatter', () => {
 
       const output = formatVersionOutput(data, 'compact');
 
-      expect(output).toBe('📦 0.4.6+2 🌿main 💾✓');
+      expect(output).toBe('Dynamic version: 0.4.6+2 🌿main 💾✓');
     });
 
     test('shows add-to-patch format with derivation', () => {
@@ -40,7 +40,7 @@ describe('Output Formatter', () => {
 
       const output = formatVersionOutput(data, 'compact');
 
-      expect(output).toBe('📦 0.4.8 (0.4.6+2) 🌿main 💾✓');
+      expect(output).toBe('Dynamic version: 0.4.8 (0.4.6+2) 🌿main 💾✓');
     });
 
     test('shows dirty indicator for append-commits', () => {
@@ -52,7 +52,7 @@ describe('Output Formatter', () => {
 
       const output = formatVersionOutput(data, 'compact');
 
-      expect(output).toBe('📦 0.4.6+2* 🌿main 💾✓');
+      expect(output).toBe('Dynamic version: 0.4.6+2* 🌿main 💾✓');
     });
 
     test('shows dirty indicator for add-to-patch', () => {
@@ -64,7 +64,7 @@ describe('Output Formatter', () => {
 
       const output = formatVersionOutput(data, 'compact');
 
-      expect(output).toBe('📦 0.4.8* (0.4.6+2) 🌿main 💾✓');
+      expect(output).toBe('Dynamic version: 0.4.8* (0.4.6+2) 🌿main 💾✓');
     });
 
     test('no derivation shown when version equals base (0 commits)', () => {
@@ -77,7 +77,7 @@ describe('Output Formatter', () => {
       const output = formatVersionOutput(data, 'compact');
 
       // Should not show derivation when there are no commits
-      expect(output).toBe('📦 0.4.6 🌿main 💾✓');
+      expect(output).toBe('Dynamic version: 0.4.6 🌿main 💾✓');
     });
   });
 
