@@ -33,6 +33,7 @@ export const VersionManagerConfigSchema = z
 export const GenerationTriggerSchema = z.enum(['git-hook', 'cli']);
 
 export const DynamicVersionSchema = z.object({
+  _generated: z.string(),
   baseVersion: z.string(),
   branch: z.string(),
   buildNumber: z.string(),
