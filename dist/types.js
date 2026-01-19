@@ -30,6 +30,7 @@ exports.VersionManagerConfigSchema = zod_1.z
     .strict();
 exports.GenerationTriggerSchema = zod_1.z.enum(['git-hook', 'cli']);
 exports.DynamicVersionSchema = zod_1.z.object({
+    _generated: zod_1.z.string(),
     baseVersion: zod_1.z.string(),
     branch: zod_1.z.string(),
     buildNumber: zod_1.z.string(),

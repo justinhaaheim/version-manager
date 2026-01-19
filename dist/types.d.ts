@@ -35,6 +35,7 @@ export declare const GenerationTriggerSchema: z.ZodEnum<{
     cli: "cli";
 }>;
 export declare const DynamicVersionSchema: z.ZodObject<{
+    _generated: z.ZodString;
     baseVersion: z.ZodString;
     branch: z.ZodString;
     buildNumber: z.ZodString;

@@ -5,6 +5,7 @@ exports.isGitRepository = isGitRepository;
 exports.getGitDescribe = getGitDescribe;
 exports.getCurrentBranch = getCurrentBranch;
 exports.hasUncommittedChanges = hasUncommittedChanges;
+exports.isFileTrackedByGit = isFileTrackedByGit;
 exports.findLastCommitWhereFieldChanged = findLastCommitWhereFieldChanged;
 exports.countCommitsBetween = countCommitsBetween;
 exports.readFieldFromCommit = readFieldFromCommit;
@@ -52,6 +53,21 @@ async function hasUncommittedChanges() {
     try {
         const status = await execCommand('git status --porcelain');
         return status.length > 0;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Check if a file is tracked by git (not gitignored)
+ * @param filePath - Path to the file (relative to repo root or absolute)
+ * @returns true if the file is tracked, false if gitignored or not in repo
+ */
+async function isFileTrackedByGit(filePath) {
+    try {
+        // git ls-files returns the filename if it's tracked, empty if not
+        const result = await execCommand(`git ls-files -- "${filePath}"`);
+        return result.length > 0;
     }
     catch {
         return false;

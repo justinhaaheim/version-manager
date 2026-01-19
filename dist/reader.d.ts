@@ -17,6 +17,7 @@ export type { DynamicVersion, GenerationTrigger } from './types';
  * ```
  */
 export declare function validateDynamicVersion(version: unknown): {
+    _generated: string;
     baseVersion: string;
     branch: string;
     buildNumber: string;

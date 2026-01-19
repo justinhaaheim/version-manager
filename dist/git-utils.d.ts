@@ -4,6 +4,12 @@ export declare function getGitDescribe(): Promise<string>;
 export declare function getCurrentBranch(): Promise<string>;
 export declare function hasUncommittedChanges(): Promise<boolean>;
 /**
+ * Check if a file is tracked by git (not gitignored)
+ * @param filePath - Path to the file (relative to repo root or absolute)
+ * @returns true if the file is tracked, false if gitignored or not in repo
+ */
+export declare function isFileTrackedByGit(filePath: string): Promise<boolean>;
+/**
  * Find the last commit where a specific field value changed in a JSON file
  * @param filePath - Path to the JSON file (relative to repo root)
  * @param fieldName - Name of the field to track (e.g., 'codeVersionBase')

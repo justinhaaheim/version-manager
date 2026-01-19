@@ -80,11 +80,20 @@ function formatNormal(data) {
 /**
  * Compact format: Ultra Compact (single line)
  *
- * 📦 0.4.4+2 🌿main 💾✓
+ * For append-commits mode: Dynamic version: 0.4.4+2 🌿main 💾✓
+ * For add-to-patch mode:   Dynamic version: 0.4.6 (0.4.4+2) 🌿main 💾✓
  */
 function formatCompact(data) {
     const dirtyIndicator = data.dirty ? '*' : '';
-    return `📦 ${data.dynamicVersion}${dirtyIndicator} 🌿${data.branch} 💾✓`;
+    // Detect add-to-patch mode: dynamicVersion differs from base and doesn't contain '+'
+    const isAddToPatch = data.dynamicVersion !== data.baseVersion &&
+        !data.dynamicVersion.includes('+') &&
+        data.commitsSince > 0;
+    if (isAddToPatch) {
+        // Show derivation for add-to-patch mode: "0.4.6 (0.4.4+2)"
+        return `Dynamic version: ${data.dynamicVersion}${dirtyIndicator} (${data.baseVersion}+${data.commitsSince}) 🌿${data.branch} 💾✓`;
+    }
+    return `Dynamic version: ${data.dynamicVersion}${dirtyIndicator} 🌿${data.branch} 💾✓`;
 }
 /**
  * Format version output based on format type
