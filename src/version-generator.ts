@@ -4,6 +4,7 @@ import type {
   LegacyVersionManagerConfig,
   VersionCalculationMode,
   VersionManagerConfig,
+  VersionMode,
 } from './types';
 
 import {existsSync, readFileSync, writeFileSync} from 'fs';
@@ -38,6 +39,7 @@ function migrateLegacyConfig(
 
   return {
     versionCalculationMode: legacyConfig.versionCalculationMode,
+    versionMode: 'dynamic-file',
     versions,
   };
 }
@@ -92,7 +94,7 @@ function readVersionManagerConfig(configPath: string): {
  * @param mode - Calculation mode
  * @returns Calculated code version
  */
-function calculateCodeVersion(
+export function calculateCodeVersion(
   baseVersion: string,
   commitsSince: number,
   mode: VersionCalculationMode,
@@ -136,7 +138,7 @@ function calculateCodeVersion(
 /**
  * Reserved version names that cannot be used
  */
-const RESERVED_VERSION_NAMES = ['base', 'dynamic', 'build'];
+const RESERVED_VERSION_NAMES = ['base', 'dynamic', 'build', 'main'];
 
 /**
  * Validate version names in config
@@ -160,6 +162,7 @@ function validateVersionNames(versions: Record<string, unknown>): void {
 function getDefaultVersionManagerConfig(): VersionManagerConfig {
   return {
     versionCalculationMode: 'append-commits',
+    versionMode: 'dynamic-file',
     versions: {},
   };
 }
@@ -336,6 +339,184 @@ export async function generateFileBasedVersion(
     configuredFormat: config.outputFormat,
     versionData,
   };
+}
+
+/**
+ * Parse a version string into its base semver and optional +N metadata.
+ * Examples:
+ *   "1.2.3"   → { base: "1.2.3", metadata: null }
+ *   "1.2.3+5" → { base: "1.2.3", metadata: 5 }
+ */
+export function parseVersionMetadata(version: string): {
+  base: string;
+  metadata: number | null;
+} {
+  const plusIndex = version.indexOf('+');
+  if (plusIndex === -1) {
+    return {base: version, metadata: null};
+  }
+
+  const base = version.slice(0, plusIndex);
+  const metadataStr = version.slice(plusIndex + 1);
+  const metadata = parseInt(metadataStr, 10);
+
+  return {base, metadata: isNaN(metadata) ? null : metadata};
+}
+
+/**
+ * Calculate the pre-commit version for package-json mode.
+ *
+ * In package-json mode, the version in package.json is updated on every commit
+ * via a pre-commit hook. The algorithm:
+ *
+ * 1. Read current version from package.json
+ * 2. Find last commit where package.json version changed → i commits ago
+ * 3. Add 1 for the current (about-to-happen) commit → i + 1
+ * 4. Calculate new version:
+ *    - add-to-patch: X.Y.Z changed i commits ago → X.Y.(Z + i + 1)
+ *    - append-commits: X.Y.Z+N changed i commits ago → X.Y.Z+(N + i + 1)
+ *                      X.Y.Z (no +N) changed i commits ago → X.Y.Z+(i + 1)
+ *
+ * @param currentVersion - Current version string from package.json
+ * @param commitsSinceLastChange - Number of commits since the version was last changed (0 if changed in the most recent commit)
+ * @param mode - Calculation mode
+ * @returns New version string
+ */
+export function calculatePreCommitVersion(
+  currentVersion: string,
+  commitsSinceLastChange: number,
+  mode: VersionCalculationMode,
+): string {
+  const increment = commitsSinceLastChange + 1;
+
+  if (mode === 'add-to-patch') {
+    const parts = currentVersion.split('.');
+    if (parts.length !== 3) {
+      return currentVersion;
+    }
+    const [major, minor, patch] = parts.map(Number);
+    if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
+      return currentVersion;
+    }
+    return `${major}.${minor}.${patch + increment}`;
+  } else if (mode === 'append-commits') {
+    const {base, metadata} = parseVersionMetadata(currentVersion);
+    const currentCount = metadata ?? 0;
+    return `${base}+${currentCount + increment}`;
+  }
+
+  // Fallback: treat as add-to-patch
+  const parts = currentVersion.split('.');
+  if (parts.length !== 3) {
+    return currentVersion;
+  }
+  const [major, minor, patch] = parts.map(Number);
+  if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
+    return currentVersion;
+  }
+  return `${major}.${minor}.${patch + increment}`;
+}
+
+/**
+ * Generate version data for pre-commit hook in package-json mode.
+ * Calculates the version that will be written to package.json before the commit.
+ *
+ * @param generationTrigger - What triggered the version generation
+ * @returns GenerateVersionResult with pre-commit adjusted version data
+ */
+export async function generatePreCommitVersionData(
+  generationTrigger: GenerationTrigger = 'git-hook',
+): Promise<GenerateVersionResult> {
+  const configPath = join(process.cwd(), 'version-manager.json');
+
+  // Check if in git repository
+  const isRepo = await isGitRepository();
+  if (!isRepo) {
+    throw new Error(
+      'Not a git repository. Please run this command in a git project.',
+    );
+  }
+
+  // Get git branch and dirty status
+  const branch = await getCurrentBranch();
+  const gitDescribe = await getGitDescribe();
+  const dirty = gitDescribe.includes('-dirty');
+
+  // Read current version from package.json
+  const currentVersion = getPackageVersion();
+  if (!currentVersion) {
+    throw new Error(
+      'No version found in package.json. Please add a "version" field to your package.json.',
+    );
+  }
+
+  // Read config
+  const {config: rawConfig, migrated} = readVersionManagerConfig(configPath);
+  const config = rawConfig ?? getDefaultVersionManagerConfig();
+
+  if (config.versions) {
+    validateVersionNames(config.versions);
+  }
+
+  if (migrated && existsSync(configPath)) {
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    console.log('✅ Migrated version-manager.json to new format');
+    console.log('   Moved runtimeVersion to versions.runtime');
+  }
+
+  // Find last commit where package.json version changed
+  const lastCommit = await findLastCommitWhereFieldChanged(
+    'package.json',
+    'version',
+  );
+
+  // Count commits since last change
+  const commitsSinceLastChange = lastCommit
+    ? await countCommitsBetween(lastCommit, 'HEAD')
+    : 0;
+
+  // Calculate the pre-commit version (accounts for the about-to-happen commit)
+  const dynamicVersion = calculatePreCommitVersion(
+    currentVersion,
+    commitsSinceLastChange,
+    config.versionCalculationMode,
+  );
+
+  // For the base version in the output, strip any +N metadata
+  const {base: baseVersion} = parseVersionMetadata(currentVersion);
+
+  const timestamps = generateTimestamps();
+  const totalCommitsSince = commitsSinceLastChange + 1;
+
+  const versionData: DynamicVersion = {
+    _generated:
+      'This file is auto-generated by @justinhaaheim/version-manager. Do not edit.',
+    baseVersion,
+    branch,
+    buildNumber: generateBuildNumber(),
+    commitsSince: totalCommitsSince,
+    dirty,
+    dynamicVersion,
+    generationTrigger,
+    timestamp: timestamps.timestamp,
+    timestampUnix: timestamps.timestampUnix,
+    versions: config.versions ?? {},
+  };
+
+  return {
+    configuredFormat: config.outputFormat,
+    versionData,
+  };
+}
+
+/**
+ * Read the versionMode from version-manager.json config.
+ * Returns 'dynamic-file' if config is missing or versionMode is not set.
+ */
+export function getVersionMode(): VersionMode {
+  const configPath = join(process.cwd(), 'version-manager.json');
+  const {config} = readVersionManagerConfig(configPath);
+  return config?.versionMode ?? 'dynamic-file';
 }
 
 /**

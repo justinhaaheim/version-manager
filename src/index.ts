@@ -16,16 +16,22 @@ import {
 } from './output-formatter';
 import {
   addScriptsToPackageJson,
+  detectPackageManagerWithLockfile,
   getConflictingScripts,
   hasExistingDynamicVersionScripts,
   listDefaultScripts,
   readPackageJson,
+  stageFiles,
+  updateLockfile,
+  updatePackageVersion,
 } from './script-manager';
 import {
   type BumpType,
   bumpVersion,
   generateFileBasedVersion,
+  generatePreCommitVersionData,
   generateTypeDefinitions,
+  getVersionMode,
 } from './version-generator';
 import {startWatcher} from './watcher';
 
@@ -60,6 +66,13 @@ const globalOptions = {
     default: './dynamic-version.local.json',
     describe: 'Output file path',
     type: 'string' as const,
+  },
+  'pre-commit': {
+    default: false,
+    describe:
+      'Pre-commit hook mode: update package.json version and stage files (internal use)',
+    hidden: true,
+    type: 'boolean' as const,
   },
   silent: {
     alias: 's',
@@ -253,6 +266,69 @@ async function generateVersionFile(
   }
 }
 
+// Pre-commit handler for package-json mode
+async function preCommitHandler(
+  outputPath: string,
+  format: OutputFormat | null,
+  generateTypes: boolean,
+): Promise<void> {
+  const silent = format === 'silent';
+
+  // Generate version data with pre-commit calculation (+1 for the about-to-happen commit)
+  const {versionData, configuredFormat} =
+    await generatePreCommitVersionData('git-hook');
+
+  // Write dynamic-version.local.json (same as always, for full metadata)
+  const finalOutputPath =
+    outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
+  writeFileSync(finalOutputPath, JSON.stringify(versionData, null, 2) + '\n');
+
+  if (generateTypes) {
+    const versionKeys = Object.keys(versionData.versions);
+    generateTypeDefinitions(finalOutputPath, versionKeys);
+  }
+
+  // Mirror dynamicVersion to package.json
+  const success = updatePackageVersion(versionData.dynamicVersion);
+  if (!success) {
+    throw new Error('Failed to update package.json version');
+  }
+
+  // Update lockfile
+  updateLockfile(silent);
+
+  // Stage package.json + lockfile
+  const filesToStage = ['package.json'];
+  const {lockfilePath} = detectPackageManagerWithLockfile();
+  if (lockfilePath) {
+    filesToStage.push(lockfilePath);
+  }
+  stageFiles(filesToStage, silent);
+
+  // Display output
+  const effectiveFormat = format ?? configuredFormat ?? 'compact';
+  if (effectiveFormat !== 'silent') {
+    const dtsPath = generateTypes
+      ? finalOutputPath.replace(/\.json$/, '.d.ts')
+      : undefined;
+
+    const outputData: VersionOutputData = {
+      baseVersion: versionData.baseVersion,
+      branch: versionData.branch,
+      buildNumber: versionData.buildNumber,
+      commitsSince: versionData.commitsSince,
+      dirty: versionData.dirty,
+      dtsPath,
+      dynamicVersion: versionData.dynamicVersion,
+      outputPath: finalOutputPath,
+      versions: versionData.versions,
+    };
+
+    const output = formatVersionOutput(outputData, effectiveFormat);
+    console.log(output);
+  }
+}
+
 // Install command handler
 async function installCommand(
   incrementPatch: boolean,
@@ -293,15 +369,26 @@ async function installCommand(
     console.log('\n📦 Installing git hooks...');
   }
 
-  installGitHooks(incrementPatch, silent, noFail);
+  const versionMode = getVersionMode();
+  installGitHooks(incrementPatch, silent, noFail, versionMode);
 
   if (!silent) {
     console.log('✅ Git hooks installed successfully');
-    console.log('   Hooks will auto-update dynamic-version.local.json on:');
-    console.log('   - Commits (post-commit)');
-    console.log('   - Checkouts (post-checkout)');
-    console.log('   - Merges (post-merge)');
-    console.log('   - Rebases (post-rewrite)');
+    if (versionMode === 'package-json') {
+      console.log(
+        '   Pre-commit hook will auto-update package.json version on commits',
+      );
+      console.log('   Post hooks will update dynamic-version.local.json on:');
+      console.log('   - Checkouts (post-checkout)');
+      console.log('   - Merges (post-merge)');
+      console.log('   - Rebases (post-rewrite)');
+    } else {
+      console.log('   Hooks will auto-update dynamic-version.local.json on:');
+      console.log('   - Commits (post-commit)');
+      console.log('   - Checkouts (post-checkout)');
+      console.log('   - Merges (post-merge)');
+      console.log('   - Rebases (post-rewrite)');
+    }
 
     // Add scripts to package.json during install
     console.log('\n📝 Checking package.json scripts...');
@@ -572,12 +659,17 @@ async function main() {
         (yargsInstance) => yargsInstance.options(globalOptions),
         async (args) => {
           const format = getFormat(args.silent, args.compact, args.verbose);
-          await generateVersionFile(
-            args.output,
-            format,
-            args.types,
-            args['git-hook'],
-          );
+
+          if (args['pre-commit']) {
+            await preCommitHandler(args.output, format, args.types);
+          } else {
+            await generateVersionFile(
+              args.output,
+              format,
+              args.types,
+              args['git-hook'],
+            );
+          }
         },
       )
       .command(
