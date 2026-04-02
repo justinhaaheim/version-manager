@@ -1,10 +1,23 @@
+import type {VersionMode} from './types';
+
 import {execSync} from 'child_process';
 import {chmodSync, existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
-const HOOK_NAMES = [
+const POST_HOOK_NAMES = [
   'post-checkout',
   'post-commit',
+  'post-merge',
+  'post-rewrite',
+];
+
+/**
+ * In package-json mode, we use a pre-commit hook to update the version
+ * before the commit, plus post-checkout/merge/rewrite to regenerate
+ * dynamic-version.local.json (but NOT post-commit, since pre-commit handles it).
+ */
+const PACKAGE_JSON_MODE_POST_HOOKS = [
+  'post-checkout',
   'post-merge',
   'post-rewrite',
 ];
@@ -221,12 +234,59 @@ ${command}
 }
 
 /**
+ * Detect the run command for version-manager (handles dev environment)
+ */
+function detectRunCommand(silent: boolean): string {
+  const currentPackageJsonPath = join(process.cwd(), 'package.json');
+  let runCommand = 'npx @justinhaaheim/version-manager';
+
+  if (existsSync(currentPackageJsonPath)) {
+    try {
+      const packageJson = JSON.parse(
+        readFileSync(currentPackageJsonPath, 'utf-8'),
+      ) as {name?: string};
+      if (packageJson.name === '@justinhaaheim/version-manager') {
+        runCommand = 'bun run test:local';
+        if (!silent) {
+          console.log(
+            '   ℹ️  Detected local development environment, using: bun run test:local',
+          );
+        }
+      }
+    } catch {
+      // If we can't read package.json, default to npx
+    }
+  }
+
+  return runCommand;
+}
+
+/**
+ * Install or update a single hook file
+ */
+function installOrUpdateHook(
+  huskyDir: string,
+  hookName: string,
+  command: string,
+  silent: boolean,
+): void {
+  const hookPath = join(huskyDir, hookName);
+
+  if (existsSync(hookPath)) {
+    updateExistingHook(hookPath, command, hookName, silent);
+  } else {
+    createNewHook(hookPath, command, hookName, silent);
+  }
+}
+
+/**
  * Install git hooks using Husky
  */
 export function installGitHooks(
   incrementPatch = false,
   silent = false,
   noFail = false,
+  versionMode: VersionMode = 'dynamic-file',
 ): void {
   // Ensure Husky is installed
   ensureHuskyInstalled(silent);
@@ -243,44 +303,28 @@ export function installGitHooks(
     console.log(`📦 Installing git hooks to: ${huskyDir}`);
   }
 
-  // Detect if we're running from the version-manager development directory itself
-  const currentPackageJsonPath = join(process.cwd(), 'package.json');
-  let runCommand = 'npx @justinhaaheim/version-manager';
-
-  if (existsSync(currentPackageJsonPath)) {
-    try {
-      const packageJson = JSON.parse(
-        readFileSync(currentPackageJsonPath, 'utf-8'),
-      ) as {name?: string};
-      if (packageJson.name === '@justinhaaheim/version-manager') {
-        // We're in the development directory, use local script
-        runCommand = 'bun run test:local';
-        if (!silent) {
-          console.log(
-            '   ℹ️  Detected local development environment, using: bun run test:local',
-          );
-        }
-      }
-    } catch {
-      // If we can't read package.json, default to npx
-    }
-  }
+  const runCommand = detectRunCommand(silent);
 
   const incrementFlag = incrementPatch ? ' --increment-patch' : '';
   const silentFlag = silent ? ' --silent' : '';
   const noFailFlag = noFail ? ' --no-fail' : '';
   const gitHookFlag = ' --git-hook';
-  const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}${gitHookFlag}`;
 
-  for (const hookName of HOOK_NAMES) {
-    const hookPath = join(huskyDir, hookName);
+  if (versionMode === 'package-json') {
+    // Pre-commit hook: updates package.json version and stages files
+    const preCommitCommand = `${runCommand} --pre-commit${silentFlag}${noFailFlag}`;
+    installOrUpdateHook(huskyDir, 'pre-commit', preCommitCommand, silent);
 
-    if (existsSync(hookPath)) {
-      // Hook exists - update it
-      updateExistingHook(hookPath, finalCommand, hookName, silent);
-    } else {
-      // Create new hook
-      createNewHook(hookPath, finalCommand, hookName, silent);
+    // Post-checkout/merge/rewrite: regenerate dynamic-version.local.json only
+    const postHookCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}${gitHookFlag}`;
+    for (const hookName of PACKAGE_JSON_MODE_POST_HOOKS) {
+      installOrUpdateHook(huskyDir, hookName, postHookCommand, silent);
+    }
+  } else {
+    // Default dynamic-file mode: post-commit/checkout/merge/rewrite hooks
+    const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}${gitHookFlag}`;
+    for (const hookName of POST_HOOK_NAMES) {
+      installOrUpdateHook(huskyDir, hookName, finalCommand, silent);
     }
   }
 }

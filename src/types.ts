@@ -6,6 +6,8 @@ export const VersionCalculationModeSchema = z.enum([
   'append-commits',
 ]);
 
+export const VersionModeSchema = z.enum(['dynamic-file', 'package-json']);
+
 export const OutputFormatSchema = z.enum([
   'silent',
   'compact',
@@ -26,6 +28,7 @@ export const VersionManagerConfigSchema = z
   .object({
     outputFormat: OutputFormatSchema.optional(),
     versionCalculationMode: VersionCalculationModeSchema,
+    versionMode: VersionModeSchema.optional().default('dynamic-file'),
     versions: z.record(z.string(), z.string()).default({}),
   })
   .strict();
@@ -50,6 +53,7 @@ export const DynamicVersionSchema = z.object({
 export type VersionCalculationMode = z.infer<
   typeof VersionCalculationModeSchema
 >;
+export type VersionMode = z.infer<typeof VersionModeSchema>;
 export type LegacyVersionManagerConfig = z.infer<
   typeof LegacyVersionManagerConfigSchema
 >;

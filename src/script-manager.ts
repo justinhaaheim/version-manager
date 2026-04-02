@@ -1,3 +1,4 @@
+import {execSync} from 'child_process';
 import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
@@ -243,4 +244,73 @@ export function updatePackageVersion(newVersion: string): boolean {
 
   packageJson.version = newVersion;
   return writePackageJson(packageJson);
+}
+
+/**
+ * Detect which package manager to use based on lock files.
+ * Returns the lockfile path alongside the manager name.
+ */
+export function detectPackageManagerWithLockfile(): {
+  lockfilePath: string | null;
+  manager: 'bun' | 'npm';
+} {
+  const bunLockPath = join(process.cwd(), 'bun.lock');
+  const npmLockPath = join(process.cwd(), 'package-lock.json');
+
+  if (existsSync(bunLockPath)) {
+    return {lockfilePath: bunLockPath, manager: 'bun'};
+  }
+
+  if (existsSync(npmLockPath)) {
+    return {lockfilePath: npmLockPath, manager: 'npm'};
+  }
+
+  return {lockfilePath: null, manager: 'npm'};
+}
+
+/**
+ * Update the lockfile after a package.json version change.
+ * Runs `npm install` or `bun install` depending on detected package manager.
+ * @param silent - Suppress console output
+ */
+export function updateLockfile(silent = false): void {
+  const {manager} = detectPackageManagerWithLockfile();
+
+  const command = manager === 'bun' ? 'bun install' : 'npm install';
+
+  try {
+    execSync(command, {
+      cwd: process.cwd(),
+      stdio: silent ? 'pipe' : 'inherit',
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!silent) {
+      console.warn(`⚠️  Failed to update lockfile: ${message}`);
+    }
+  }
+}
+
+/**
+ * Stage specific files using git add.
+ * @param filePaths - Absolute or relative file paths to stage
+ * @param silent - Suppress console output
+ */
+export function stageFiles(filePaths: string[], silent = false): void {
+  if (filePaths.length === 0) {
+    return;
+  }
+
+  try {
+    const quoted = filePaths.map((f) => `"${f}"`).join(' ');
+    execSync(`git add ${quoted}`, {
+      cwd: process.cwd(),
+      stdio: silent ? 'pipe' : 'inherit',
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!silent) {
+      console.warn(`⚠️  Failed to stage files: ${message}`);
+    }
+  }
 }
