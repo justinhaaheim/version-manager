@@ -270,7 +270,15 @@ export function installGitHooks(
   const silentFlag = silent ? ' --silent' : '';
   const noFailFlag = noFail ? ' --no-fail' : '';
   const gitHookFlag = ' --git-hook';
-  const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}${gitHookFlag}`;
+  // Make the hook non-fatal at the shell level. A fresh checkout/worktree has
+  // no node_modules yet, so `npx` tries to download this GitHub-only package
+  // from the npm registry, 404s, and exits non-zero — which would abort the
+  // git operation that triggered the hook (clone / worktree-add / pull). The
+  // `|| echo` swallows that failure (echo exits 0) and surfaces a warning
+  // instead. The `--no-fail` flag is insufficient here: it only takes effect
+  // once version-manager actually runs, but the npx resolution fails first.
+  const nonFatalSuffix = ` || echo "WARNING: version-manager hook failed (non-fatal). If this is a fresh checkout/worktree, run 'bun install'."`;
+  const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}${gitHookFlag}${nonFatalSuffix}`;
 
   for (const hookName of HOOK_NAMES) {
     const hookPath = join(huskyDir, hookName);
