@@ -55,6 +55,7 @@
   },
   "dependencies": {
     "@inquirer/prompts": "7.10.1",
+    "@justinhaaheim/justin-sdk": "github:justinhaaheim/justin-sdk#main",
     "chokidar": "^3.6.0",
     "yargs": "18.0.0",
     "zod": "4.1.12"
