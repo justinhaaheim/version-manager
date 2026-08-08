@@ -34,3 +34,9 @@ coverage
 
 **/CLAUDE.md
 
+
+.beads
+
+*.log
+
+**/.claude/worktrees/

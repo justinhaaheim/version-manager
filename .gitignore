@@ -35,3 +35,17 @@ dynamic-version.local.d.ts
 # Test fixtures (generated files)
 tests/fixtures/git-repos/*.tar.gz
 tests/tmp/
+
+# justin-sdk baseline (appended)
+dist/
+build/
+coverage/
+*.log
+.env
+.env.local
+*.local
+*.local.json
+.bv/
+.beads/.br_recovery/
+.beads/.local_version
+.claude/worktrees/

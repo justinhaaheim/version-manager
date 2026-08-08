@@ -565,3 +565,4 @@ npx @justinhaaheim/version-manager watch --debounce 500
 - Backend projects that use version info
 - Any project where you want live version updates during development
 - Projects using build tools other than Metro
+@AGENTS.md
