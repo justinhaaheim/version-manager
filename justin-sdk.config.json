@@ -1,5 +1,5 @@
 {
-  "version": "0.11.0",
+  "version": "0.18.2",
   "components": [
     "base-setup",
     "gitignore-setup",
@@ -12,5 +12,5 @@
     "claude-md-setup",
     "beads-setup"
   ],
-  "lastSynced": "2026-07-31"
+  "lastSynced": "2026-08-18"
 }
