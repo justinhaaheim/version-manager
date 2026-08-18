@@ -35,5 +35,6 @@
   },
   "sandbox": {
     "excludedCommands": ["br"]
-  }
+  },
+  "claudeMdExcludes": ["/Users/jhaa/.claude/rules/justin-sdk/critical-rules.md"]
 }
