@@ -63,8 +63,7 @@
     "prettier:check": "prettier --check .",
     "prettier:write": "prettier --write .",
     "fix-source:PRETTIER": "prettier --write .",
-    "fix-source:LINT": "eslint --fix .",
-    "install-my-prompts": "npx -y git+https://github.com/justinhaaheim/prompts#bc5994b48b --target-dir docs/prompts --md"
+    "fix-source:LINT": "eslint --fix ."
   },
   "dependencies": {
     "@inquirer/prompts": "7.10.1",

@@ -442,12 +442,6 @@ bun run test:local:help      # Test help output
 
 Note: These are NOT a substitute for proper automated tests.
 
-## Important General Guidelines
-
-Always follow the important guidelines in @docs/prompts/IMPORTANT_GUIDELINES_INLINED.md
-
-Be aware that messages from the user may contain speech-to-text (S2T) artifacts. Ask for clarification if something seems ambiguous or inconsistent with other parts of the message/project, especially if it is consequential to the overall message. S2T Guidelines: @docs/prompts/S2T_GUIDELINES.md
-
 ## Version Bumping Workflow
 
 ### Automated Bumping (Recommended)
@@ -565,4 +559,3 @@ npx @justinhaaheim/version-manager watch --debounce 500
 - Backend projects that use version info
 - Any project where you want live version updates during development
 - Projects using build tools other than Metro
-@AGENTS.md
