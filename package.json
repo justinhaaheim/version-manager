@@ -72,7 +72,7 @@
     "zod": "4.1.12"
   },
   "devDependencies": {
-    "@justinhaaheim/justin-sdk": "github:justinhaaheim/justin-sdk#v0.18.2",
+    "@justinhaaheim/justin-sdk": "github:justinhaaheim/justin-sdk#v0.27.0",
     "@types/bun": "1.2.23",
     "@types/node": "^20.0.0",
     "@types/yargs": "17.0.33",
