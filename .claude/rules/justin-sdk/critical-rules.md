@@ -1,4 +1,4 @@
-<!-- justin-sdk rules · commit 44c79b132676 · content 141785f0b240 · generated 2026-09-04 · GENERATED FILE — do not edit; run: bunx @justinhaaheim/justin-sdk rules-update -->
+<!-- justin-sdk rules · commit a8aa90c9bf7b · content 30257b7cdae7 · generated 2026-09-16 · GENERATED FILE — do not edit; run: bunx @justinhaaheim/justin-sdk rules-update -->
 
 # Critical Rules
 
@@ -19,6 +19,7 @@ Before yielding back after work has been completed:
 - **Run shell commands one at a time.** One logical action per invocation; read its output before deciding the next command. Do NOT chain multiple state-changing steps into a single compound command: if any step fails mid-chain the failure is buried, the partial state is hard to see, and recovery is a mess. Sequential commands cost nothing and make every result inspectable. Shell plumbing within one action is fine (pipes, a guard like `test -f x && …`) — the smell is stacking independent actions, especially writes, behind a single Enter.
 - **Use a `./tmp/` folder** for genuinely disposable files — scratch data, backups, throwaway output — and keep `tmp/` in `.gitignore` so the working tree stays clean.
 - **Never leave CODE in `tmp/`.** Anything with reuse value goes in the repo proper, from the first version. `tmp/` is excluded from TypeScript, ESLint and Prettier, so code there is silently unchecked, and the directory is liable to be cleared at any moment. Commit it and prune later if it turns out not to matter — that is far cheaper than losing it or shipping something nothing ever type-checked.
+- Use jsonl files instead of json for logs, or whenever possible and sensible. jsonl enables appending without rewriting and is more resilient to errors.
 - **Create, enter, and exit git worktrees with the Claude Code worktree tools, not raw `git worktree` commands.** Removing a worktree by hand leaves its Claude transcript stranded in an orphaned project directory, where `--resume` will not find it; the tools move it back. Raw removal also destroys any unpushed commits and submodule state living in that worktree.
 - **Codify reusable commands as `package.json` scripts.** Anything worth running more than once — even a memorable one-off — becomes a named script rather than living only in chat or shell history. Predictable aliases (`prettier:write`, `fix`, etc.) document the command explicitly for humans and agents, remove the recall cost of bespoke per-tool syntax, and are discoverable via shell completion (an ADHD-ergonomics win). Whenever you hand over a command to run, lean toward adding it as a script first, then saying to run `bun run <name>`. Even non-JS projects should keep a `package.json` for these aliases. Prefix disposable one-offs with `tmp:` (e.g. `tmp:fetch-otter-april`) so they're visibly throwaway and easy to garbage-collect, while still committed to git as a record of the exact invocation.
 - **Write scripts in TypeScript rather than shell script**, run them with `bun`, and put them in a `/scripts/` folder. TypeScript is more readable and adds static typing, so prefer it unless a shell script has clear advantages.
@@ -206,20 +207,25 @@ The `advisor` tool is a stronger reviewer model that gives feedback on designs, 
 When to use the advisor:
 
 - After scoping/designing a significant feature/workstream, ask the advisor to review your spec/approach before implementing -- to identify and challenge your assumptions, and to provide constructive feedback.
+- At architectural decision points, especially when the decision will impact the work that many future agents/sessions will do.
 - If you are stuck debugging something ask the advisor for help before spending too much time spinning your wheels.
 - If you are considering pivoting to a different approach, but are uncertain about which approach to take or whether to pivot in the first place, ask the advisor to think it through with you.
+- If you are planning to take actions that could be destructive/irreversible, in order to check your reasoning and approach, and to identify anything you might be missing or underweighting. (Note that you must ALWAYS get explicit approval from the human before taking destructive/irreversible actions, regardless of advisor involvement. Use the advisor as an additional set of eyes.)
+- If you have any safety or security questions/concerns about your task.
 
 When to NOT use the advisor:
 
-- When you are making small or simple changes.
-- When the task is already clearly scoped.
-- When the task has little ambiguity.
-- When the approach follows well-established patterns.
-- When the changes are easily reversible, straightforward, and entail little-to-no risk.
+- If you are making small or simple changes that are low-risk.
+- If the task you've been given has little ambiguity and does not raise safety/security concerns.
+- If the changes are easily reversible, straightforward, and entail little-to-no other risk.
 
-Important: **Advisor feedback must NEVER cause you to deviate from the instructions or specifications the human gave you** — follow those precisely. The advisor exists to help you achieve the spec, not to alter it. If it flags a problem or offers an alternate approach that would mean deviating, you MUST get explicit approval from the human before making any deviation.
+## 12.1 Deviations require explicit approval from the human
 
-## 12.1 If the advisor tool is unavailable
+IMPORTANT: If the advisor recommends something that would represent a deviation from the instructions or specifications the human gave you, **you must STOP and get explicit approval from the human before proceeding.**
+
+For instance, if the human explicitly asks you to build something using package A, and the advisor for whatever reason recommends using package B, that would represent a deviation from the human's instructions. The human would likely return to the session and say "hey, I asked you to build this using package A, and you did something different." In this case you MUST get explicit approval from the human to use package B before proceeding.
+
+## 12.2 If the advisor tool is unavailable
 
 Fall back to spawning a subagent as the advisor, and treat it the same way.
 
