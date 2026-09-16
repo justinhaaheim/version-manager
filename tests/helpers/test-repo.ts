@@ -158,6 +158,52 @@ export class TestRepo {
   }
 
   /**
+   * Run an arbitrary git command in the repository.
+   * Unlike makeCommit(), this never throws — the caller inspects exitCode.
+   * Needed for tests that drive git itself (merges, rebases, --no-verify,
+   * --amend) and that expect some of those operations to fail.
+   */
+  runGit(args: string): CliResult {
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_EMAIL: 'test@example.com',
+      GIT_AUTHOR_NAME: 'Test User',
+      GIT_COMMITTER_EMAIL: 'test@example.com',
+      GIT_COMMITTER_NAME: 'Test User',
+    };
+
+    try {
+      const stdout = execSync(`git ${args}`, {
+        cwd: this.tempDir,
+        encoding: 'utf-8',
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return {exitCode: 0, stderr: '', stdout};
+    } catch (error: unknown) {
+      const err = error as {
+        status?: number;
+        stderr?: Buffer | string;
+        stdout?: Buffer | string;
+      };
+      return {
+        exitCode: err.status ?? 1,
+        stderr: err.stderr?.toString() ?? '',
+        stdout: err.stdout?.toString() ?? '',
+      };
+    }
+  }
+
+  /**
+   * Read and parse package.json from the repository
+   */
+  readPackageJson(): {version: string} & Record<string, unknown> {
+    return JSON.parse(this.readFile('package.json')) as {
+      version: string;
+    } & Record<string, unknown>;
+  }
+
+  /**
    * Make a commit in the repository
    */
   makeCommit(message: string, addAll = true): void {

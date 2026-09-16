@@ -1,5 +1,8 @@
 import type {TestRepo} from './test-repo';
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 /**
  * Helper functions to set up common test repository scenarios
  */
@@ -105,6 +108,108 @@ export function setupRepoWithCommitsAfterConfig(
     repo.writeFile(`file${i}.txt`, `Content ${i}\n`);
     repo.makeCommit(`Add file ${i}`);
   }
+}
+
+/**
+ * Set up a repo configured for `versionMode: 'package-json'`, with working
+ * git hooks wired to the local source tree.
+ *
+ * Two accommodations are made so the test never touches the network:
+ *
+ * 1. `husky` is declared in devDependencies and `.husky/` is pre-created, so
+ *    `ensureHuskyInstalled()` short-circuits instead of shelling out to
+ *    `npm install --save-dev husky`.
+ * 2. `core.hooksPath` is pointed at `.husky/` directly rather than at husky's
+ *    `_` shim directory, and a shebang is prepended to each generated hook.
+ *    This runs the generated hook *command* under real git, which is what we
+ *    are testing; husky's own dispatch shim is out of scope.
+ *
+ * The generated hooks invoke `npx @justinhaaheim/version-manager`, which will
+ * not resolve inside a temp fixture, so that prefix is rewritten to run this
+ * repo's `src/index.ts` under bun.
+ */
+export function setupPackageJsonModeRepo(
+  repo: TestRepo,
+  packageVersion = '0.1.0',
+  versionCalculationMode: 'add-to-patch' | 'append-commits' = 'add-to-patch',
+): void {
+  repo.initGit();
+  repo.writeFile('README.md', '# Test Repo\n');
+  repo.makeCommit('Initial commit');
+
+  repo.writeFile(
+    'package.json',
+    JSON.stringify(
+      {
+        devDependencies: {husky: '^9.1.7'},
+        name: 'test-package',
+        version: packageVersion,
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+
+  repo.writeFile(
+    'version-manager.json',
+    JSON.stringify(
+      {
+        versionCalculationMode,
+        versionMode: 'package-json',
+        versions: {},
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  // node_modules/ is ignored because the pre-commit hook shells out to a real
+  // `npm install` / `bun install` on every commit (see updateLockfile), which
+  // materialises node_modules even in a dependency-free fixture.
+  repo.writeFile('.gitignore', '*.local.json\n*.local.d.ts\nnode_modules/\n');
+  repo.makeCommit('Add version config files');
+}
+
+/**
+ * Install git hooks into a fixture repo and make them executable by real git.
+ * See setupPackageJsonModeRepo() for why the rewriting is necessary.
+ */
+export function activateHooks(repo: TestRepo): void {
+  repo.writeFile('.husky/.keep', '');
+
+  const result = repo.runCli('install --silent --non-interactive');
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Hook install failed (exit ${result.exitCode}): ${result.stderr}`,
+    );
+  }
+
+  repo.runGit('config core.hooksPath .husky');
+
+  const cliPath = path.join(__dirname, '..', '..', 'src', 'index.ts');
+  for (const hookName of [
+    'pre-commit',
+    'post-commit',
+    'post-checkout',
+    'post-merge',
+    'post-rewrite',
+  ]) {
+    if (!repo.fileExists(`.husky/${hookName}`)) {
+      continue;
+    }
+    const body = repo
+      .readFile(`.husky/${hookName}`)
+      .split('npx @justinhaaheim/version-manager')
+      .join(`bun ${cliPath}`);
+    repo.writeFile(`.husky/${hookName}`, `#!/bin/sh\n${body}`);
+    fs.chmodSync(path.join(repo.getPath(), '.husky', hookName), 0o755);
+  }
+
+  // Commit the hooks so they survive branch switches, exactly as a real repo
+  // does. Amending the existing config commit (rather than adding a new one)
+  // keeps the commit count clean, so tests can count bumps from a known base.
+  // --no-verify stops this setup step from bumping the version itself.
+  repo.runGit('add -A');
+  repo.runGit('commit --amend --no-verify --no-edit');
 }
 
 /**
