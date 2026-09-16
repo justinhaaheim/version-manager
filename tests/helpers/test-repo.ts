@@ -163,13 +163,14 @@ export class TestRepo {
    * Needed for tests that drive git itself (merges, rebases, --no-verify,
    * --amend) and that expect some of those operations to fail.
    */
-  runGit(args: string): CliResult {
+  runGit(args: string, envOverrides: Record<string, string> = {}): CliResult {
     const env = {
       ...process.env,
       GIT_AUTHOR_EMAIL: 'test@example.com',
       GIT_AUTHOR_NAME: 'Test User',
       GIT_COMMITTER_EMAIL: 'test@example.com',
       GIT_COMMITTER_NAME: 'Test User',
+      ...envOverrides,
     };
 
     try {

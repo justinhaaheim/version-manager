@@ -1,4 +1,6 @@
 import {afterEach, beforeEach, describe, expect, test} from 'bun:test';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import {
   activateHooks,
@@ -180,34 +182,35 @@ describe('package-json version mode', () => {
       expect(count).toBe('3'); // initial + config + first
     });
 
-    test('rebase does not re-run the hook, leaving versions unchanged', () => {
+    test('rebase does not re-run the hook, so the version undercounts history', () => {
       // DOCUMENTS A LIMITATION: pre-commit does not run during rebase, so
-      // replayed commits keep whatever version they were authored with.
+      // replayed commits keep whatever version they were authored with even
+      // though the branch now contains strictly more commits.
       setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
       activateHooks(repo);
+
+      const base = repo.runGit('rev-parse --abbrev-ref HEAD').stdout.trim();
 
       repo.runGit('checkout -b feature');
       repo.writeFile('f.txt', 'f\n');
       repo.runGit('add -A');
       repo.runGit('commit -m "feature work"');
-      const featureVersion = repo.readPackageJson().version;
-      expect(featureVersion).toBe('0.1.1');
+      expect(repo.readPackageJson().version).toBe('0.1.1');
 
-      repo.runGit('checkout main || git checkout master');
+      // Advance base WITHOUT bumping, so the rebase replays cleanly.
+      repo.runGit(`checkout ${base}`);
       repo.writeFile('m.txt', 'm\n');
       repo.runGit('add -A');
-      repo.runGit('commit -m "main work"');
+      repo.runGit('commit --no-verify -m "base work"');
 
       repo.runGit('checkout feature');
-      const rebase = repo.runGit('rebase main || git rebase master');
+      const rebase = repo.runGit(`rebase ${base}`);
+      expect(rebase.exitCode).toBe(0);
 
-      if (rebase.exitCode === 0) {
-        // Version was NOT recomputed during the replay.
-        expect(repo.readPackageJson().version).toBe(featureVersion);
-      } else {
-        // A conflict on package.json is itself the finding.
-        expect(rebase.stderr + rebase.stdout).toContain('package.json');
-      }
+      // The branch gained a commit, but the version did not move: nothing
+      // recomputed it during the replay.
+      expect(repo.readPackageJson().version).toBe('0.1.1');
+      expect(repo.runGit('rev-list --count HEAD').stdout.trim()).toBe('4');
     });
 
     test('branches of EQUAL length compute the same version and merge cleanly, colliding', () => {
@@ -338,44 +341,57 @@ describe('package-json version mode', () => {
   });
 
   describe('package manager side effects', () => {
-    test('committing shells out to a real package-manager install', () => {
-      // DOCUMENTS A DESIGN COST: updateLockfile() runs `npm install` /
-      // `bun install` on every single commit, to keep a lockfile in sync with
-      // the version field. Measured separately: bun.lock does not record the
-      // root version at all, and `npm ci` tolerates root-version drift, so
-      // this step buys nothing while making every commit shell out.
+    test('a failing package manager is swallowed and the commit still succeeds', () => {
+      // DOCUMENTS A "failure is not empty" VIOLATION: updateLockfile() catches
+      // every error from `npm install` / `bun install` and only console.warn()s.
+      // A package manager that is broken, offline, or mid-conflict produces a
+      // commit that looks completely successful.
       //
-      // The observable proof is that a dependency-free fixture grows a
-      // node_modules/ directory purely from committing.
+      // The failure is induced rather than assumed: a stub `npm` that exits 1
+      // is placed first on PATH. The hook itself runs under `bun`, which is
+      // resolved by absolute path, so only the package manager is broken.
       setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+
+      // Force the npm code path by giving the repo a package-lock.json.
+      repo.writeFile(
+        'package-lock.json',
+        JSON.stringify(
+          {lockfileVersion: 3, name: 'test-package', version: '0.1.0'},
+          null,
+          2,
+        ) + '\n',
+      );
       activateHooks(repo);
 
-      expect(repo.fileExists('node_modules')).toBe(false);
+      const stubDir = path.join(repo.getPath(), 'stub-bin');
+      fs.mkdirSync(stubDir, {recursive: true});
+      const stubNpm = path.join(stubDir, 'npm');
+      const marker = path.join(repo.getPath(), 'stub-npm-was-called');
+      fs.writeFileSync(
+        stubNpm,
+        `#!/bin/sh\ntouch "${marker}"\necho "stub npm: deliberate failure" >&2\nexit 1\n`,
+      );
+      fs.chmodSync(stubNpm, 0o755);
 
       repo.writeFile('a.txt', 'a\n');
-      repo.runGit('add -A');
-      repo.runGit('commit -m "first"');
+      repo.runGit('add a.txt');
+      const commit = repo.runGit('commit -m "first"', {
+        PATH: `${stubDir}:${process.env.PATH ?? ''}`,
+      });
 
-      // Only observable when the sandbox permits a real install; when the
-      // install fails, updateLockfile() swallows the error silently and the
-      // commit still succeeds — which is itself the point being documented.
-      expect(repo.readPackageJson().version).toBe('0.1.1');
-    });
+      // Guard against the test passing for the wrong reason: the hook really
+      // did shell out to the (failing) package manager.
+      expect(fs.existsSync(marker)).toBe(true);
 
-    test('a failed lockfile update does not fail the commit', () => {
-      // DOCUMENTS A "failure is not empty" VIOLATION: updateLockfile() and
-      // stageFiles() both catch every error and only console.warn. If
-      // `git add` fails, package.json is rewritten on disk but never staged,
-      // so the commit silently records the OLD version while the working tree
-      // shows the new one — with no non-zero exit anywhere.
-      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
-      activateHooks(repo);
-
-      repo.writeFile('a.txt', 'a\n');
-      repo.runGit('add -A');
-      const commit = repo.runGit('commit -m "first"');
-
+      // npm failed, yet nothing surfaces it: the commit succeeds and the
+      // version is still bumped and staged.
       expect(commit.exitCode).toBe(0);
+      expect(repo.readPackageJson().version).toBe('0.1.1');
+
+      const committed = JSON.parse(
+        repo.runGit('show HEAD:package.json').stdout,
+      ) as {version: string};
+      expect(committed.version).toBe('0.1.1');
     });
   });
 
