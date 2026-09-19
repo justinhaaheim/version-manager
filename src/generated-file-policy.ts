@@ -28,13 +28,20 @@ export interface OutputPathOption {
 /**
  * Turn the parsed value of --output into an OutputPathOption.
  *
+ * The empty string is treated as absent, not as a path. `--output` typed with
+ * no value after it parses to '', and the only thing writing to '' can do is
+ * throw ENOENT. MEASURED, not assumed: before the yargs `default` was removed,
+ * that same invocation fell back to the default path and wrote the file with
+ * exit 0, so mapping '' to the default is what keeps dynamic-file mode
+ * behaving exactly as it did.
+ *
  * @param parsedOutput - yargs' value for --output: `undefined` when the flag
  *   was absent (the option deliberately declares no yargs `default`)
  */
 export function resolveOutputPathOption(
   parsedOutput: string | undefined,
 ): OutputPathOption {
-  if (parsedOutput === undefined) {
+  if (parsedOutput === undefined || parsedOutput === '') {
     return {explicit: false, path: DEFAULT_OUTPUT_PATH};
   }
 

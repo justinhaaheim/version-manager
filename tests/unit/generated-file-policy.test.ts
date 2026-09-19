@@ -26,6 +26,17 @@ describe('generated file policy', () => {
       });
     });
 
+    test('an empty --output counts as absent, not as a path', () => {
+      // `--output` typed with no value after it parses to ''. Writing to ''
+      // can only throw. Measured against the pre-change build: that
+      // invocation used to fall back to the default path and exit 0, so
+      // treating '' as absent is what keeps dynamic-file mode unchanged.
+      expect(resolveOutputPathOption('')).toEqual({
+        explicit: false,
+        path: DEFAULT_OUTPUT_PATH,
+      });
+    });
+
     test('--output set to the default PATH is still explicit', () => {
       // The reason this function exists. Provenance cannot be recovered by
       // comparing the value against the default string: a user who types
