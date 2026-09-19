@@ -7,6 +7,12 @@ import {
 import {TestRepo} from '../helpers/test-repo';
 
 /**
+ * Integration tests spawn a real CLI subprocess; under full-suite load that
+ * routinely exceeds bun's default per-test timeout (see the 70i epic notes).
+ */
+const TEST_TIMEOUT_MS = 30000;
+
+/**
  * Integration tests for CLI output formatting
  */
 describe('CLI Output Format', () => {
@@ -134,5 +140,50 @@ describe('CLI Output Format', () => {
       expect(result.stdout).toContain('--verbose');
       expect(result.stdout).toContain('--silent');
     });
+  });
+
+  describe('Usage errors (finding F9)', () => {
+    test(
+      'an unknown flag exits non-zero even with --no-fail',
+      () => {
+        setupRepoWithVersionConfig(repo);
+
+        const result = repo.runCli('--no-fail --bogus-flag');
+
+        // --no-fail means "a version-generation hiccup must not break the
+        // caller". It does NOT mean "report a mistyped invocation as
+        // success": a typo inside an installed hook would then fail silently
+        // forever.
+        expect(result.exitCode).toBe(1);
+        expect(result.stderr).toContain('Unknown argument');
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      'an unknown flag exits non-zero without --no-fail',
+      () => {
+        setupRepoWithVersionConfig(repo);
+
+        const result = repo.runCli('--bogus-flag');
+
+        expect(result.exitCode).toBe(1);
+        expect(result.stderr).toContain('Unknown argument');
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      'a valid invocation with --no-fail still succeeds',
+      () => {
+        setupRepoWithVersionConfig(repo);
+
+        // The control: the F9 fix must not turn --no-fail into a no-op.
+        const result = repo.runCli('--no-fail --silent');
+
+        expect(result.exitCode).toBe(0);
+      },
+      TEST_TIMEOUT_MS,
+    );
   });
 });

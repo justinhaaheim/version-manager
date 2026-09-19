@@ -944,16 +944,24 @@ async function main() {
       .fail((msg: string | null, err: Error | null, yargsInstance) => {
         if (err !== null && err !== undefined) {
           // A command failed. The message is the whole story; the usage
-          // screen is noise.
+          // screen is noise. This is the kind of failure --no-fail is about,
+          // so it goes through failureExitCode().
           console.error('❌ Failed:', err.message);
-        } else {
-          // A usage or validation problem (unknown flag, bad argument),
-          // where the help screen IS the useful answer.
-          yargsInstance.showHelp();
-          console.error(`\n❌ ${msg ?? 'Invalid arguments'}`);
+          process.exit(failureExitCode());
         }
 
-        process.exit(failureExitCode());
+        // A usage or validation problem (unknown flag, bad argument), where
+        // the help screen IS the useful answer.
+        yargsInstance.showHelp();
+        console.error(`\n❌ ${msg ?? 'Invalid arguments'}`);
+
+        // ALWAYS exit 1 here, --no-fail or not (finding F9). "the command ran
+        // and hit a hiccup" and "you invoked me wrongly" are different facts,
+        // and --no-fail only ever meant the first one. Reporting a typo'd flag
+        // as success would let a mistake inside an installed hook fail
+        // silently forever. yargs itself exited 1 on usage errors before this
+        // handler existed; that behaviour is preserved deliberately.
+        process.exit(1);
       })
       .parseAsync();
 
