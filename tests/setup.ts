@@ -16,7 +16,12 @@ import {setDefaultTimeout} from 'bun:test';
  *
  * Individual tests may still set their own timeout; an explicit one wins.
  *
- * Wired in via the `[test] preload` entry in bunfig.toml, so it applies to
- * `bun test` however it is invoked, not only through the package.json script.
+ * Wired in via the `[test] preload` entry in bunfig.toml. MEASURED CAVEAT: the
+ * preload alone is not reliable for a full-suite run — three consecutive runs
+ * of one unchanged tree gave 10, 8 and 8 failures, and the two extras died at
+ * exactly 5000ms, so the default had not been applied to those files. The
+ * authoritative setting is therefore `--timeout 30000` on the `test` script in
+ * package.json, which no file can be missed by. This preload stays as the
+ * backstop for a bare `bun test`, so run `bun run test` for a trustworthy gate.
  */
 setDefaultTimeout(30_000);
