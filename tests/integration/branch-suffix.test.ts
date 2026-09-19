@@ -380,11 +380,10 @@ describe('branchSuffix knob', () => {
         // initial + config + a = 3 commits on HEAD
         expect(repo.runGit('rev-list --count HEAD').stdout.trim()).toBe('3');
 
-        // `2>&1` because runCli() cannot return stderr on a successful run and
-        // the fallback notice is a warning.
-        const result = repo.runCli('2>&1');
+        const result = repo.runCli('');
         expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain('none of the configured main branches');
+        // The fallback notice is a warning, so it goes to stderr.
+        expect(result.stderr).toContain('none of the configured main branches');
 
         // The version is still produced, from the fallback count.
         expect(readDynamicVersion(repo)).toBe('0.1.1-feat-x.3');
@@ -404,9 +403,10 @@ describe('branchSuffix knob', () => {
         repo.writeFile('a.txt', 'a\n');
         repo.makeCommit('add a');
 
-        const result = repo.runCli('--silent 2>&1');
+        const result = repo.runCli('--silent');
         expect(result.exitCode).toBe(0);
         expect(result.stdout).not.toContain('branchSuffix');
+        expect(result.stderr).not.toContain('branchSuffix');
         expect(readDynamicVersion(repo)).toBe('0.1.1-feat-x.3');
       },
       TEST_TIMEOUT_MS,

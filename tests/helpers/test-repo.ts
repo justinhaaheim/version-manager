@@ -1,4 +1,4 @@
-import {execSync} from 'child_process';
+import {execSync, spawnSync} from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -68,7 +68,21 @@ export class TestRepo {
   }
 
   /**
-   * Run version-manager CLI in this repository
+   * Run version-manager CLI in this repository.
+   *
+   * spawnSync, not execSync (finding F2): execSync returns only stdout and
+   * throws on a non-zero exit, so stderr was unreachable on a SUCCESSFUL run
+   * and tests asserting on warning text had to append `2>&1` to the command
+   * string. spawnSync returns stdout, stderr and the exit code for every run.
+   *
+   * `shell: true` keeps the historical semantics — callers pass a command
+   * STRING with flags in it, and a few still rely on shell quoting.
+   *
+   * @param command - Arguments appended after the CLI path
+   * @returns The captured stdout, stderr and exit code
+   * @throws If the process could not be spawned, or died on a signal. Neither
+   *   is an exit code, and reporting either as one would be a measurement
+   *   failure dressed up as a result (critical rule 6).
    */
   runCli(command: string): CliResult {
     const cliPath = path.join(__dirname, '..', '..', 'src', 'index.ts');
@@ -76,54 +90,49 @@ export class TestRepo {
     // Parse command to handle flags
     const fullCommand = `bun ${cliPath} ${command}`.trim();
 
-    try {
-      // Use spawn-like approach to capture both stdout and stderr
-      const result = execSync(fullCommand, {
-        cwd: this.tempDir,
-        encoding: 'utf-8',
-        env: {
-          ...process.env,
-          // Ensure git user is configured for test commits
-          GIT_AUTHOR_EMAIL: 'test@example.com',
-          GIT_AUTHOR_NAME: 'Test User',
-          GIT_COMMITTER_EMAIL: 'test@example.com',
-          GIT_COMMITTER_NAME: 'Test User',
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+    const result = spawnSync(fullCommand, {
+      cwd: this.tempDir,
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        // Ensure git user is configured for test commits
+        GIT_AUTHOR_EMAIL: 'test@example.com',
+        GIT_AUTHOR_NAME: 'Test User',
+        GIT_COMMITTER_EMAIL: 'test@example.com',
+        GIT_COMMITTER_NAME: 'Test User',
+      },
+      shell: true,
+    });
 
-      // Note: execSync with stdio: ['pipe', 'pipe', 'pipe'] only captures stdout
-      // stderr is inherited, so we can't capture it here without more complex setup
-      const stdout = result;
-
-      // Try to parse as JSON if it looks like JSON
-      let json: unknown;
-      try {
-        json = JSON.parse(stdout);
-      } catch {
-        // Not JSON, that's fine
-      }
-
-      return {
-        exitCode: 0,
-        json,
-        stderr: '', // Can't easily capture stderr with execSync on success
-        stdout,
-      };
-    } catch (error: unknown) {
-      // Type guard for execSync error with status, stderr, and stdout properties
-      const err = error as {
-        status?: number;
-        stderr?: Buffer | string;
-        stdout?: Buffer | string;
-      };
-
-      return {
-        exitCode: err.status ?? 1,
-        stderr: err.stderr?.toString() ?? '',
-        stdout: err.stdout?.toString() ?? '',
-      };
+    if (result.error != null) {
+      throw new Error(
+        `Failed to spawn \`${fullCommand}\`: ${result.error.message}`,
+      );
     }
+
+    if (result.status === null) {
+      throw new Error(
+        `\`${fullCommand}\` died on signal ${result.signal ?? 'unknown'} without an exit code`,
+      );
+    }
+
+    const stdout = result.stdout ?? '';
+    const stderr = result.stderr ?? '';
+
+    // Try to parse as JSON if it looks like JSON
+    let json: unknown;
+    try {
+      json = JSON.parse(stdout);
+    } catch {
+      // Not JSON, that's fine
+    }
+
+    return {
+      exitCode: result.status,
+      json,
+      stderr,
+      stdout,
+    };
   }
 
   /**

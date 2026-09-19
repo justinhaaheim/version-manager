@@ -646,12 +646,11 @@ describe('package-json version mode', () => {
         ) + '\n',
       );
 
-      // 2>&1 because TestRepo.runCli cannot capture stderr on a successful
-      // run (version-manager-70i.13 F2).
-      const result = repo.runCli('--pre-commit 2>&1');
+      const result = repo.runCli('--pre-commit');
 
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('not in the git index');
+      // console.warn, so stderr.
+      expect(result.stderr).toContain('not in the git index');
       expect(repo.readPackageJson().version).toBe('0.1.1');
       // Still untracked: the fallback writes the working tree only. Adding a
       // whole unstaged file to the index is the bigger version of the bug
