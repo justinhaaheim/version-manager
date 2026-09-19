@@ -385,6 +385,51 @@ While `branchSuffix.enabled` is `true`, version-manager **owns** the prerelease 
 
 This is deliberate. In `package-json` mode the decorated version is committed into `package.json` and read back as the input to the next computation; without stripping, the suffix would compound, or the version would freeze in place with no error at all. If you hand-manage prerelease versions, leave this knob off.
 
+## The package.json merge driver (`package-json` mode only)
+
+In `package-json` mode the computed version is written into `package.json` on every commit, so two branches that have both committed have both edited the same line. **Every** merge between them conflicts on that line, even when nothing else disagrees.
+
+`version-manager install` registers a git merge driver that resolves it. Two things are written:
+
+```gitattributes
+# .gitattributes — committed, travels with the repo
+package.json merge=version-manager
+```
+
+```bash
+# .git/config — local to each clone, does NOT travel
+git config merge.version-manager.driver 'npx @justinhaaheim/version-manager merge-driver %O %A %B'
+git config merge.version-manager.name  'Keep our package.json version on merge (version-manager)'
+```
+
+Both are written idempotently: running `install` twice leaves one `.gitattributes` entry and one config entry, an existing `.gitattributes` is appended to rather than rewritten, and a line that already points `package.json` at some **other** merge driver is left alone and reported.
+
+### The policy: ours wins
+
+The driver takes **ours** — the version on the branch being merged **into**. Merging `feature` into `main` keeps main's version.
+
+The reason is that main's version then counts the commits that landed **on main**: monotonic, stable however people branched, and a squash of a 500-commit branch lands at main + 1 rather than jumping 500. The trade-off, accepted deliberately: the merge does **not** add the branch's commits to the version, so a merge of two commits' work still moves the version by the one commit that records the merge.
+
+Nothing else about `package.json` is touched. The driver rewrites the version value in its copies of the base and their side to match ours and then runs `git merge-file`, so every other key merges by git's normal rules — **including conflicting, loudly, when the two sides genuinely disagree** about a dependency or a script. If anything at all goes wrong (no version field, a `package.json` that does not parse, a replacement that does not verify), it falls back to exactly the merge git would have done without it: a conflict you resolve by hand, never a silently wrong file.
+
+### It does NOT fix the GitHub merge button
+
+**Researched 2026-09-19.** GitHub's web merge buttons — _Merge pull request_, _Squash and merge_, _Rebase and merge_ — do **not** apply the `.gitattributes` `merge` attribute. A pull request whose `package.json` versions have diverged is still reported as conflicting, and its merge buttons are still blocked, exactly as before this driver existed.
+
+- For a **custom** driver this is structural: git's own `gitattributes` manual requires both the versioned `.gitattributes` line **and** a `merge.<name>.driver` entry in `.git/config` or `~/.gitconfig`. The second, by design, never travels with a repository — so there is nowhere for a repo to ship the command, and GitHub could not run it even in principle.
+- For the **built-in** strategies there is no such barrier, and it still does not work: GitHub's community feature request for `merge=union` is open, and kubernetes/kubernetes#70576 (2018) is titled _"remove the union merge driver since GitHub doesn't support it"_. GitHub's own "Resolving a merge conflict on GitHub" documentation never mentions `.gitattributes` at all.
+- GitHub **does** honour `.gitattributes` for other purposes (the documented `linguist-*` attributes), so "GitHub ignores `.gitattributes`" would be too broad. The gap is specific to the `merge` attribute during pull-request merges.
+
+**So:** merge locally (`git merge` / `git merge --squash` then push), or resolve the `package.json` conflict by hand in GitHub's editor. Getting custom merge behaviour server side means not using the button at all — a GitHub Actions job or a merge bot that checks out both branches on a runner, sets the driver in the runner's real git config and pushes a real merge. That works because a runner is an ordinary VM with real git, not because GitHub supports drivers.
+
+### Known limitations
+
+- **Every clone must run `install` again.** The `.gitattributes` line is committed and travels; the `merge.version-manager.driver` entry cannot. A collaborator who has not run `install` simply gets today's behaviour — git falls back to its built-in merge and the version line conflicts. Nothing breaks.
+- **Do not hand-write half the configuration.** With the attribute in place, a `merge.version-manager.name` entry and **no** `.driver` entry makes git abort the merge outright — `fatal: custom merge driver version-manager lacks command line.` — rather than fall back. `install` writes the driver first so it cannot leave you there; if you edit `.git/config` by hand, remove the whole `[merge "version-manager"]` section rather than just the driver line.
+- **Rebase keeps the upstream's version** (measured). During a rebase git's "ours" is the branch you are rebasing **onto**, so replaying `feature` onto `main` leaves `package.json` at main's version and drops the branch's bump; a commit whose _only_ change was the version bump is dropped entirely as already-upstream. The rest of the commit applies normally. Rebase never re-runs the pre-commit hook either, so the version stands still until the next commit.
+- **`git commit --amend` re-runs the hook and bumps again**, with or without this driver.
+- The driver is registered in `package-json` mode only. In `dynamic-file` mode `package.json`'s version changes only when you deliberately bump it, and silently picking a side of a deliberate bump is not something to install on your behalf.
+
 ## TypeScript Support
 
 The package includes full TypeScript definitions. For the generated file:
