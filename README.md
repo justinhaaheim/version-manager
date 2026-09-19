@@ -348,14 +348,16 @@ Best for pre-release/dev builds where you want to see commit count explicitly.
 
 ## Version Modes: where the computed version ends up
 
-`versionMode` in `version-manager.json` picks between two ways of delivering the computed version.
+`versionMode` in `version-manager.json` picks between three ways of delivering the computed version.
 
-|                         | `dynamic-file` (default)                                                      | `package-json`                                                     |
-| ----------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Where the version lands | `dynamic-version.local.json`, gitignored                                      | the `version` field of `package.json`, committed                   |
-| When it is computed     | after the fact — `post-commit`, `post-checkout`, `post-merge`, `post-rewrite` | before the fact — `pre-commit`, so the number is inside the commit |
-| What a consumer needs   | the generated file, so `.git` and a run of this tool wherever you build       | nothing but `package.json`                                         |
-| History it tolerates    | any                                                                           | linear (see the limitations below)                                 |
+|                         | `dynamic-file` (default)                                                      | `package-json`                                                     | `event-log`                                                             |
+| ----------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| What is committed       | nothing                                                                       | the computed version, in `package.json`                            | the **evidence**: one line per commit in `version.jsonl`                |
+| Where the version lands | `dynamic-version.local.json`, gitignored                                      | the `version` field of `package.json`, committed                   | nowhere — it is derived on demand                                       |
+| When it is computed     | after the fact — `post-commit`, `post-checkout`, `post-merge`, `post-rewrite` | before the fact — `pre-commit`, so the number is inside the commit | when you ask for it                                                     |
+| What a consumer needs   | the generated file, so `.git` and a run of this tool wherever you build       | nothing but `package.json`                                         | `version.jsonl` and `package.json`; no `.git`, no generated file        |
+| Merging two branches    | nothing to merge                                                              | conflicts, or silently undercounts (see below)                     | unions, always, with one `.gitattributes` line and nothing to configure |
+| History it tolerates    | any                                                                           | linear (see the limitations below)                                 | any                                                                     |
 
 ### Why `package-json` mode exists
 
@@ -410,6 +412,91 @@ All of these are measured. The first four are pinned by tests in `tests/integrat
 - **`append-commits` and `npm publish` do not mix** (probe, not a test). npm strips build metadata: probed with `npm publish --dry-run`, a package at version `1.0.0+5` published as `1.0.0` and produced `publishprobe-1.0.0.tgz`, so every commit would try to publish the same version and the registry would reject the second. Use `add-to-patch` if you publish to npm.
 - **Installing this package from GitHub does not currently get you any of this** (probe, not a test). The committed `dist/` that a GitHub install runs was built on 2026-06-11 and predates `package-json` mode entirely — `grep` finds no `versionMode` anywhere in it, and `node dist/index.js merge-driver …` answers `Unknown arguments: merge-driver` and exits 1 without merging anything. Until `dist/` is rebuilt and committed, run this tool from a local checkout.
 
+## `event-log` mode (opt-in)
+
+Off by default. Nothing changes for anyone who does not set it.
+
+The other two modes store the **result** — a single number — so every merge has to reconcile two results, which is where the merge policy, the merge driver and the "two equal branches silently undercount" problem all come from. `event-log` mode stores the **evidence** instead: an append-only `version.jsonl`, one JSON object per line, committed to git.
+
+```jsonl
+{"b":"main","e":"commit","t":"2026-09-19T19:49:17.197Z"}
+{"b":"main","e":"commit","t":"2026-09-19T19:49:17.367Z"}
+{"e":"base","t":"2026-09-19T19:49:33.248Z","v":"0.6.0"}
+```
+
+The version is **derived** from that and written nowhere:
+
+- the base is the **last `base` event by timestamp**, or `package.json`'s `version` when the log has none;
+- the count is the **commit events after that base event**;
+- the two are combined by your `versionCalculationMode`, exactly as in the other modes.
+
+Merging two branches unions their lines, and a count over a union is the same number whichever order the lines arrived in. So there is no policy to choose, nothing to reconcile, and no computed version anywhere that can be stale.
+
+### Turning it on
+
+Write `version-manager.json` first — as with `package-json` mode, `install` neither asks nor creates one:
+
+```json
+{
+  "versionCalculationMode": "add-to-patch",
+  "versionMode": "event-log",
+  "versions": {}
+}
+```
+
+Then install, and commit what it produces:
+
+```bash
+npx @justinhaaheim/version-manager install
+git add version.jsonl .gitattributes && git commit -m 'Set up event-log versioning'
+```
+
+`install` does four things and nothing else:
+
+1. creates an **empty `version.jsonl`** if there is none (an empty log is legal — it derives `package.json`'s version with a count of zero);
+2. adds **`version.jsonl merge=union`** to `.gitattributes`, appending rather than rewriting, and leaving an existing file's other entries alone;
+3. installs a **`pre-commit` hook** and no `post-*` hooks;
+4. adds no lifecycle scripts, touches `.gitignore` not at all, and writes no `dynamic-version.local.json` unless you pass `--output` explicitly.
+
+Running it twice changes nothing the second time.
+
+**`merge=union` needs no git config.** It is a git **built-in**, so unlike the [`package.json` merge driver](#the-packagejson-merge-driver-package-json-mode-only-opt-in) it travels with the repository, works in a fresh clone and in a worktree, and cannot fail because a command is missing. The one `.gitattributes` line is the whole merge story — but it must be committed, and it must be on **every branch** for the merge to use it.
+
+### What the pre-commit hook does, exactly
+
+It appends **one line** to `version.jsonl`, in the working tree and in the git index, so the event is part of the commit being made. It writes nothing else: not `package.json`, not a generated file.
+
+- It **fails loudly**. A failed append or a failed index write aborts the commit and names the failed command, rather than recording a commit that is missing from the evidence.
+- It reads the **index** copy, so an unstaged edit to `version.jsonl` is not swept into the commit.
+- Every line ends in a newline, and an append to a file that is missing its final newline repairs it first. This matters: gluing two JSON objects onto one line would cost the log an event.
+
+### Reading the version
+
+```ts
+import {readVersion} from '@justinhaaheim/version-manager/version-reader';
+
+const {version, base, baseSource, commitCount, skippedLines} = readVersion();
+```
+
+**No `.git` and no generated file** — it reads `version.jsonl` and `package.json` and derives the answer, which is the case `package-json` mode was invented for (CI with no history, Expo EAS builds packed without `.git`). `baseSource` tells you whether the base came from a `base` event or from `package.json`. `skippedLines` is empty when every line parsed; a line that did not is **reported**, never silently dropped.
+
+### Bumping
+
+```bash
+npx @justinhaaheim/version-manager bump --minor
+```
+
+appends a `base` event and **does not touch `package.json`**. `package.json`'s `version` stays an ordinary, human-owned semver, which is what keeps npm's rules out of this mode entirely.
+
+### Known limitations — all measured
+
+- **`git commit --amend` counts one high.** The hook runs again and appends a second event; the first one is still in the log. This is accepted rather than fixed: de-duplicating would mean the log was no longer append-only, and an over-count by one does not make two different states of the code look the same.
+- **`git rebase` does not re-run the hook**, so a rebased branch's count stands still until its next ordinary commit. Stale, never wrong.
+- **GitHub's merge button ignores `.gitattributes` merge attributes entirely** — custom drivers _and_ the built-ins, `union` included. A pull request whose two sides have both appended will therefore still conflict on `version.jsonl` in the web UI. Merge locally, or resolve it by keeping **both** sides' lines (which is what `union` would have done).
+- **The count is not the commit count.** It is the count of commits made with the hook installed and running: `--no-verify`, a colleague who has not installed the hooks, and a rebase all leave gaps. The number still rises and still distinguishes two states of the code; it is not an audit of your history.
+- **`npm publish` publishes `package.json`'s version**, not the derived one, because this mode never writes `package.json`. That is a feature here — the derived version is for identifying builds, and your release version stays yours.
+- **Timestamps order the log, so a badly wrong clock reorders it.** A machine set years in the past can append a commit event that sorts before the current base event and is therefore not counted.
+
 ## Branch Name Suffix (opt-in)
 
 Off by default. When enabled, a build made on a branch that is **not** one of the configured main branches carries a semver **prerelease** naming the branch and counting that branch's own commits:
@@ -445,6 +532,7 @@ A build labelled `0.32.1-my-branch.3` is also identifiable on a device at a glan
 
 - **Format**: `<core>-<sanitised-branch>.<n>`, inserted before any `+build` metadata.
 - **`n`** is the number of commits this branch has of its own — `git rev-list --count <mainBranch>..HEAD` — plus one in `package-json` mode for the commit being made. If none of the configured main branches resolve, the total commit count is used instead and the CLI says so. If no count can be measured at all, **no suffix is applied** and the plain version is emitted; a failed measurement never becomes a `0`.
+  - In **`event-log` mode** `n` comes from the log rather than from git: each commit event records the branch it happened on, so `n` is the number of this branch's own commit events since the base. No merge-base measurement is taken, and there is nothing to fail.
 - **`n === 0` means no suffix.** A branch with no commits of its own is identical to its base, so it keeps the undecorated version.
 - **Precedence**: a prerelease sorts _before_ the release it decorates, so `0.32.3-feat-x.3 < 0.32.3`. That is intended: a branch build is a prerelease of the version it will become. Unlike `+N` build metadata, a prerelease is **not** stripped by `npm publish`.
 - **Sanitisation**: every character outside `[0-9A-Za-z-]` becomes `-`, runs of `-` collapse, leading/trailing `-` are trimmed; an empty result becomes `branch`, and an all-digits result is prefixed with `b` (`007` → `b007`). This is lossy: `feat/x` and `feat-x` both produce `feat-x`.

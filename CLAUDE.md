@@ -19,7 +19,8 @@
 1. **package.json** (committed): Standard npm version field is the base version
 2. **version-manager.json** (committed): Configuration — `versionCalculationMode`, `versionMode`, the `versions` map, and the `branchSuffix` / `mergeDriver` knobs. Every field is optional, and so is the file
 3. **dynamic-version.local.json** (gitignored): Generated file with `baseVersion`, `dynamicVersion`, `buildNumber`, `commitsSince` and the `versions` map — written in `dynamic-file` mode only
-4. **Git hooks**: Automatically regenerate version file on git operations (`dynamic-file` mode), or write the version into package.json before the commit (`package-json` mode)
+4. **version.jsonl** (committed, `event-log` mode only): An append-only log — one JSON object per commit — from which the version is DERIVED. Nothing stores a computed version in this mode
+5. **Git hooks**: Automatically regenerate version file on git operations (`dynamic-file` mode), write the version into package.json before the commit (`package-json` mode), or append one commit event to version.jsonl before the commit (`event-log` mode)
 
 ## Development Commands
 
@@ -155,6 +156,11 @@ src/
   version-generator.ts      # Core version calculation logic
   branch-suffix.ts          # The branchSuffix knob: sanitising, counting, applying
   generated-file-policy.ts  # Whether this mode writes dynamic-version.local.json at all
+  event-log.ts              # event-log mode: the schemas, the parse, THE DERIVATION. Pure
+  event-log-mode.ts         # event-log mode: the appends, to the working tree and the index
+  version-reader.ts         # Public API for event-log mode: readVersion(), no git, no file
+  version-math.ts           # calculateCodeVersion, alone, so the reader pulls in no git
+  gitattributes.ts          # One idempotent .gitattributes line, without clobbering
   json-text-edit.ts         # Surgical text edits to one JSON value, formatting preserved
   merge-driver.ts           # The package.json merge driver and its registration
   output-formatter.ts       # Rendering the CLI's version output
@@ -296,7 +302,7 @@ docs/
 
 **The README is the source of truth for all three. Read it before changing any of them, and put behaviour changes there rather than duplicating them here.**
 
-- **`versionMode`** — `dynamic-file` (default) writes the computed version to the gitignored generated file after the fact, via `post-*` hooks. `package-json` writes it into the `version` field of `package.json` *before* the commit, via a `pre-commit` hook, so the committed `package.json` carries the real version and a consumer needs neither `.git` nor a generated file. `package-json` mode is for linear history: amend double-bumps, rebase never re-runs the hook, and an auto-merge commit keeps a stale version. See "Version Modes: where the computed version ends up" in the README.
+- **`versionMode`** — `dynamic-file` (default) writes the computed version to the gitignored generated file after the fact, via `post-*` hooks. `package-json` writes it into the `version` field of `package.json` *before* the commit, via a `pre-commit` hook, so the committed `package.json` carries the real version and a consumer needs neither `.git` nor a generated file. `package-json` mode is for linear history: amend double-bumps, rebase never re-runs the hook, and an auto-merge commit keeps a stale version. `event-log` commits an append-only `version.jsonl` — one line per commit — and DERIVES the version from it, storing it nowhere; merges union the lines (`version.jsonl merge=union`, a git built-in needing no config), so there is no policy to choose and nothing that can go stale. See "Version Modes: where the computed version ends up" and "`event-log` mode (opt-in)" in the README.
 - **`branchSuffix`** — off by default. Adds a semver prerelease naming the branch (`0.32.3-feat-x.3`) on branches that are not in `mainBranches`. While it is on, **version-manager owns the prerelease segment**: every computation strips whatever prerelease it finds and re-applies its own, so a hand-authored `1.0.0-beta.1` is discarded. That is what stops the suffix compounding when it is committed and read back in `package-json` mode. See "Branch Name Suffix (opt-in)" in the README.
 - **`mergeDriver`** — off by default, and it needs `versionMode: 'package-json'` as well. Registers a git merge driver that resolves `package.json` version conflicts to OURS. It is off by default because a registered driver whose *command* cannot run turns a merge into a conflict with no markers in it, which an author can stage away and lose the other side. See "The package.json merge driver" in the README.
 
@@ -308,7 +314,7 @@ When you add a knob: declare it in `VersionManagerConfigSchema` (the schema is `
 ```typescript
 {
   versionCalculationMode: 'add-to-patch' | 'append-commits';
-  versionMode: 'dynamic-file' | 'package-json';        // default 'dynamic-file'
+  versionMode: 'dynamic-file' | 'event-log' | 'package-json';  // default 'dynamic-file'
   versions: Record<string, string>;                    // e.g., {runtime: "0.1.0"}; default {}
   branchSuffix: {enabled: boolean; mainBranches: string[]};  // default {false, ['main','master']}
   mergeDriver: {enabled: boolean};                     // default {enabled: false}
@@ -486,11 +492,13 @@ bun test <file>             # Run specific test file
   - `generated-file-policy.test.ts` - Which mode writes a file
   - `pre-commit-version.test.ts` - The pre-commit version arithmetic
   - `version-replacement-guard.test.ts` - The post-condition that a replacement took
+  - `event-log.test.ts` - Parsing the log, and the derivation, with no git at all
 - `tests/integration/` - Integration tests with temporary git repos
   - `version-generation.test.ts` - Core version calculation tests
   - `package-json-mode.test.ts` - The whole of `package-json` mode, including its measured limitations
   - `branch-suffix.test.ts` - The suffix end to end, through real commits
   - `merge-driver.test.ts` - Real git merges, and the knob that gates registration
+  - `event-log-mode.test.ts` - Real git merges of `version.jsonl`, install, bump, the reader
   - `generated-file-policy.test.ts` - What install writes in each mode
   - `cli-output.test.ts` - CLI output format tests
   - `config-migration.test.ts` - Config migration tests
