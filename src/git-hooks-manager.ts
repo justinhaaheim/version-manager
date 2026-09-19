@@ -12,17 +12,6 @@ const POST_HOOK_NAMES = [
 ];
 
 /**
- * In package-json mode, we use a pre-commit hook to update the version
- * before the commit, plus post-checkout/merge/rewrite to regenerate
- * dynamic-version.local.json (but NOT post-commit, since pre-commit handles it).
- */
-const PACKAGE_JSON_MODE_POST_HOOKS = [
-  'post-checkout',
-  'post-merge',
-  'post-rewrite',
-];
-
-/**
  * Detect which package manager to use based on lock files
  * @returns 'bun' if bun.lock exists, 'npm' if package-lock.json exists,
  *          or 'npm' with warning if neither exists
@@ -325,11 +314,11 @@ export function installGitHooks(
     const preCommitCommand = `${runCommand} --pre-commit${silentFlag}${noFailFlag}`;
     installOrUpdateHook(huskyDir, 'pre-commit', preCommitCommand, silent);
 
-    // Post-checkout/merge/rewrite: regenerate dynamic-version.local.json only
-    const postHookCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}${gitHookFlag}${nonFatalSuffix}`;
-    for (const hookName of PACKAGE_JSON_MODE_POST_HOOKS) {
-      installOrUpdateHook(huskyDir, hookName, postHookCommand, silent);
-    }
+    // No post-* hooks in this mode (version-manager-70i.2, D12). The only job
+    // post-checkout/post-merge/post-rewrite ever had was regenerating
+    // dynamic-version.local.json, which this mode does not produce; keeping
+    // them would run the CLI on every checkout to write nothing. post-commit
+    // was already absent because pre-commit covers the commit itself.
   } else {
     // Default dynamic-file mode: post-commit/checkout/merge/rewrite hooks
     const finalCommand = `${runCommand}${incrementFlag}${silentFlag}${noFailFlag}${gitHookFlag}${nonFatalSuffix}`;

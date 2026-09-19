@@ -1,0 +1,115 @@
+import type {DynamicVersion, VersionMode} from './types';
+
+import {writeFileSync} from 'fs';
+
+import {generateTypeDefinitions} from './version-generator';
+
+/**
+ * Where the generated version file goes when the user did not say.
+ *
+ * This lives here rather than in the yargs option definition on purpose: with
+ * a yargs `default`, "the user typed --output" and "nobody typed anything"
+ * arrive at the handler as the same string and become indistinguishable.
+ * See resolveOutputPathOption().
+ */
+export const DEFAULT_OUTPUT_PATH = './dynamic-version.local.json';
+
+/**
+ * The --output option plus the one thing the path alone cannot tell us:
+ * whether a human asked for it.
+ */
+export interface OutputPathOption {
+  /** True only when --output/-o was present on the command line. */
+  explicit: boolean;
+  /** The path to write to if a write happens at all. */
+  path: string;
+}
+
+/**
+ * Turn the parsed value of --output into an OutputPathOption.
+ *
+ * @param parsedOutput - yargs' value for --output: `undefined` when the flag
+ *   was absent (the option deliberately declares no yargs `default`)
+ */
+export function resolveOutputPathOption(
+  parsedOutput: string | undefined,
+): OutputPathOption {
+  if (parsedOutput === undefined) {
+    return {explicit: false, path: DEFAULT_OUTPUT_PATH};
+  }
+
+  return {explicit: true, path: parsedOutput};
+}
+
+/**
+ * THE decision, made in exactly one place (version-manager-70i.2, D12).
+ *
+ * package-json mode exists to deliver the dynamic-version effect WITHOUT
+ * dynamic-version.local.json: the file is gitignored, so CI has to regenerate
+ * it (which needs .git) and Expo EAS builds cannot produce it at all. So in
+ * that mode nothing is written — unless the user explicitly passed --output,
+ * which is unambiguous intent and is honoured.
+ *
+ * dynamic-file mode is unchanged: it always writes.
+ *
+ * Both the CLI path (generateVersionFile) and the hook path
+ * (preCommitHandler) call this, so they cannot drift apart.
+ */
+export function shouldWriteGeneratedFiles(
+  versionMode: VersionMode,
+  output: OutputPathOption,
+): boolean {
+  if (versionMode === 'package-json') {
+    return output.explicit;
+  }
+
+  return true;
+}
+
+/**
+ * What writeGeneratedFiles() actually wrote.
+ *
+ * `null` means "deliberately not written", never "the write failed": a failed
+ * write throws out of writeFileSync rather than being reported as a null path.
+ * Consumers use these paths to report what happened, so a null must not be
+ * rendered as a successful write.
+ */
+export interface GeneratedFileWriteResult {
+  dtsPath: string | null;
+  jsonPath: string | null;
+}
+
+/**
+ * Write the generated version file (and its .d.ts) if the mode calls for it.
+ *
+ * @param options.generateTypes - Whether the .d.ts companion is wanted
+ * @param options.output - Resolved --output option
+ * @param options.versionData - The computed version data to serialise
+ * @param options.versionMode - versionMode from version-manager.json
+ * @returns The paths written, or nulls when this mode writes nothing
+ */
+export function writeGeneratedFiles(options: {
+  generateTypes: boolean;
+  output: OutputPathOption;
+  versionData: DynamicVersion;
+  versionMode: VersionMode;
+}): GeneratedFileWriteResult {
+  const {generateTypes, output, versionData, versionMode} = options;
+
+  if (!shouldWriteGeneratedFiles(versionMode, output)) {
+    return {dtsPath: null, jsonPath: null};
+  }
+
+  writeFileSync(output.path, JSON.stringify(versionData, null, 2) + '\n');
+
+  if (!generateTypes) {
+    return {dtsPath: null, jsonPath: output.path};
+  }
+
+  const dtsPath = generateTypeDefinitions(
+    output.path,
+    Object.keys(versionData.versions),
+  );
+
+  return {dtsPath, jsonPath: output.path};
+}

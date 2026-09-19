@@ -7,6 +7,13 @@ import {hideBin} from 'yargs/helpers';
 import yargs from 'yargs/yargs';
 
 import packageJson from '../package.json';
+import {
+  DEFAULT_OUTPUT_PATH,
+  type OutputPathOption,
+  resolveOutputPathOption,
+  shouldWriteGeneratedFiles,
+  writeGeneratedFiles,
+} from './generated-file-policy';
 import {installGitHooks} from './git-hooks-manager';
 import {isFileTrackedByGit} from './git-utils';
 import {
@@ -30,7 +37,6 @@ import {
   bumpVersion,
   generateFileBasedVersion,
   generatePreCommitVersionData,
-  generateTypeDefinitions,
   getVersionMode,
 } from './version-generator';
 import {startWatcher} from './watcher';
@@ -63,7 +69,11 @@ const globalOptions = {
   },
   output: {
     alias: 'o',
-    default: './dynamic-version.local.json',
+    // Deliberately no yargs `default`: the handlers must be able to tell
+    // "the user asked for this path" from "nobody said anything", because in
+    // package-json mode an explicit --output is the one thing that still
+    // produces a file. resolveOutputPathOption() applies the default instead.
+    defaultDescription: DEFAULT_OUTPUT_PATH,
     describe: 'Output file path',
     type: 'string' as const,
   },
@@ -202,15 +212,11 @@ async function ensureGitignoreEntries(
 
 // Generate version file command
 async function generateVersionFile(
-  outputPath: string,
+  output: OutputPathOption,
   format: OutputFormat | null,
   generateTypes: boolean,
   gitHook = false,
 ): Promise<void> {
-  // Determine the actual output paths based on the outputPath parameter
-  const finalOutputPath =
-    outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
-
   // Check that package.json exists (required)
   const packageJsonPath = join(process.cwd(), 'package.json');
   if (!existsSync(packageJsonPath)) {
@@ -230,14 +236,14 @@ async function generateVersionFile(
   const {versionData, configuredFormat, branchSuffixWarning} =
     await generateFileBasedVersion(gitHook ? 'git-hook' : 'cli');
 
-  // Write to output file (finalOutputPath already calculated above for gitignore check)
-  writeFileSync(finalOutputPath, JSON.stringify(versionData, null, 2) + '\n');
-
-  // Generate TypeScript definition file if requested
-  if (generateTypes) {
-    const versionKeys = Object.keys(versionData.versions);
-    generateTypeDefinitions(finalOutputPath, versionKeys);
-  }
+  // Whether anything is written is decided in ONE place, shared with the
+  // pre-commit path below (version-manager-70i.2, D12).
+  const written = writeGeneratedFiles({
+    generateTypes,
+    output,
+    versionData,
+    versionMode: getVersionMode(),
+  });
 
   // Use CLI format if specified, otherwise fall back to config, otherwise 'compact'
   const effectiveFormat = format ?? configuredFormat ?? 'compact';
@@ -249,30 +255,25 @@ async function generateVersionFile(
 
   // Format and display output based on format
   if (effectiveFormat !== 'silent') {
-    const dtsPath = generateTypes
-      ? finalOutputPath.replace(/\.json$/, '.d.ts')
-      : undefined;
-
     const outputData: VersionOutputData = {
       baseVersion: versionData.baseVersion,
       branch: versionData.branch,
       buildNumber: versionData.buildNumber,
       commitsSince: versionData.commitsSince,
       dirty: versionData.dirty,
-      dtsPath,
+      dtsPath: written.dtsPath,
       dynamicVersion: versionData.dynamicVersion,
-      outputPath: finalOutputPath,
+      outputPath: written.jsonPath,
       versions: versionData.versions,
     };
 
-    const output = formatVersionOutput(outputData, effectiveFormat);
-    console.log(output);
+    console.log(formatVersionOutput(outputData, effectiveFormat));
   }
 }
 
 // Pre-commit handler for package-json mode
 async function preCommitHandler(
-  outputPath: string,
+  output: OutputPathOption,
   format: OutputFormat | null,
   generateTypes: boolean,
 ): Promise<void> {
@@ -282,15 +283,15 @@ async function preCommitHandler(
   const {versionData, configuredFormat, branchSuffixWarning} =
     await generatePreCommitVersionData('git-hook');
 
-  // Write dynamic-version.local.json (same as always, for full metadata)
-  const finalOutputPath =
-    outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
-  writeFileSync(finalOutputPath, JSON.stringify(versionData, null, 2) + '\n');
-
-  if (generateTypes) {
-    const versionKeys = Object.keys(versionData.versions);
-    generateTypeDefinitions(finalOutputPath, versionKeys);
-  }
+  // Same single decision as the CLI path above: in package-json mode this
+  // writes nothing, which is the whole point of the mode (D12). package.json
+  // below is the real output.
+  const written = writeGeneratedFiles({
+    generateTypes,
+    output,
+    versionData,
+    versionMode: getVersionMode(),
+  });
 
   // Mirror dynamicVersion to package.json
   const success = writePreCommitVersion(versionData.dynamicVersion);
@@ -318,31 +319,26 @@ async function preCommitHandler(
   }
 
   if (effectiveFormat !== 'silent') {
-    const dtsPath = generateTypes
-      ? finalOutputPath.replace(/\.json$/, '.d.ts')
-      : undefined;
-
     const outputData: VersionOutputData = {
       baseVersion: versionData.baseVersion,
       branch: versionData.branch,
       buildNumber: versionData.buildNumber,
       commitsSince: versionData.commitsSince,
       dirty: versionData.dirty,
-      dtsPath,
+      dtsPath: written.dtsPath,
       dynamicVersion: versionData.dynamicVersion,
-      outputPath: finalOutputPath,
+      outputPath: written.jsonPath,
       versions: versionData.versions,
     };
 
-    const output = formatVersionOutput(outputData, effectiveFormat);
-    console.log(output);
+    console.log(formatVersionOutput(outputData, effectiveFormat));
   }
 }
 
 // Install command handler
 async function installCommand(
   incrementPatch: boolean,
-  outputPath: string,
+  output: OutputPathOption,
   format: OutputFormat | null,
   nonInteractive: boolean,
   noFail: boolean,
@@ -352,34 +348,45 @@ async function installCommand(
 ): Promise<void> {
   const silent = format === 'silent';
 
-  // Determine filenames for gitignore check
-  const finalOutputPath =
-    outputPath ?? join(process.cwd(), 'dynamic-version.local.json');
-  const jsonFilename =
-    finalOutputPath.split('/').pop() ?? 'dynamic-version.local.json';
-  const dtsFilename =
-    finalOutputPath
-      .replace(/\.json$/, '.d.ts')
-      .split('/')
-      .pop() ?? 'dynamic-version.local.d.ts';
+  // Read once, up front: the mode decides which of the generated-file
+  // machinery below is installed at all (version-manager-70i.2, D12).
+  const versionMode = getVersionMode();
 
-  // Ensure generated files are in .gitignore (only during install)
-  await ensureGitignoreEntries(
-    jsonFilename,
-    dtsFilename,
-    generateTypes,
-    nonInteractive || gitHook,
-    silent,
-  );
+  // Two related but different questions:
+  //  - will THIS run write a generated file? (mode + an explicit --output)
+  //  - is the generated file part of this project at all? (mode alone)
+  // The gitignore entries follow the first; the hooks and lifecycle scripts,
+  // which never pass --output, follow the second.
+  const writesGeneratedFiles = shouldWriteGeneratedFiles(versionMode, output);
+  const usesGeneratedFile = versionMode !== 'package-json';
+
+  if (writesGeneratedFiles) {
+    // Determine filenames for gitignore check
+    const jsonFilename =
+      output.path.split('/').pop() ?? 'dynamic-version.local.json';
+    const dtsFilename =
+      output.path
+        .replace(/\.json$/, '.d.ts')
+        .split('/')
+        .pop() ?? 'dynamic-version.local.d.ts';
+
+    // Ensure generated files are in .gitignore (only during install)
+    await ensureGitignoreEntries(
+      jsonFilename,
+      dtsFilename,
+      generateTypes,
+      nonInteractive || gitHook,
+      silent,
+    );
+  }
 
   // Generate the version file
-  await generateVersionFile(outputPath, format, generateTypes, gitHook);
+  await generateVersionFile(output, format, generateTypes, gitHook);
 
   if (!silent) {
     console.log('\n📦 Installing git hooks...');
   }
 
-  const versionMode = getVersionMode();
   installGitHooks(incrementPatch, silent, noFail, versionMode);
 
   if (!silent) {
@@ -388,10 +395,9 @@ async function installCommand(
       console.log(
         '   Pre-commit hook will auto-update package.json version on commits',
       );
-      console.log('   Post hooks will update dynamic-version.local.json on:');
-      console.log('   - Checkouts (post-checkout)');
-      console.log('   - Merges (post-merge)');
-      console.log('   - Rebases (post-rewrite)');
+      console.log(
+        '   No post-* hooks installed: this mode writes no dynamic-version.local.json',
+      );
     } else {
       console.log('   Hooks will auto-update dynamic-version.local.json on:');
       console.log('   - Commits (post-commit)');
@@ -413,7 +419,10 @@ async function installCommand(
           '   💡 Use --force to overwrite existing scripts with defaults',
         );
       } else {
-        const result = addScriptsToPackageJson(force, true);
+        // The lifecycle scripts (prepare/prebuild/predev/prestart) exist only
+        // to regenerate the generated file. In package-json mode there is no
+        // generated file, so they would shell out on every build for nothing.
+        const result = addScriptsToPackageJson(force, usesGeneratedFile);
         if (result.success) {
           console.log(`   ✅ ${result.message}`);
           if (result.conflictsOverwritten.length > 0) {
@@ -431,12 +440,14 @@ async function installCommand(
           console.log(
             '   - npm run dynamic-version:install-scripts  # Update scripts',
           );
-          console.log(
-            '\n   Added lifecycle scripts (auto-regenerate version):',
-          );
-          console.log('   - prebuild   # Runs before npm run build');
-          console.log('   - predev     # Runs before npm run dev');
-          console.log('   - prestart   # Runs before npm run start');
+          if (usesGeneratedFile) {
+            console.log(
+              '\n   Added lifecycle scripts (auto-regenerate version):',
+            );
+            console.log('   - prebuild   # Runs before npm run build');
+            console.log('   - predev     # Runs before npm run dev');
+            console.log('   - prestart   # Runs before npm run start');
+          }
         } else {
           console.log(`   ⚠️  ${result.message}`);
         }
@@ -510,7 +521,7 @@ async function installScriptsCommand(force: boolean): Promise<void> {
 async function bumpCommand(
   bumpType: BumpType,
   customVersionsToUpdate: string[],
-  outputPath: string,
+  output: OutputPathOption,
   format: OutputFormat | null,
   nonInteractive: boolean,
   generateTypes: boolean,
@@ -529,7 +540,7 @@ async function bumpCommand(
   if (!silent) {
     console.log('📝 Regenerating dynamic-version.local.json...');
   }
-  await generateVersionFile(outputPath, format, generateTypes, gitHook);
+  await generateVersionFile(output, format, generateTypes, gitHook);
 
   // Optionally commit
   if (commit) {
@@ -669,12 +680,13 @@ async function main() {
         (yargsInstance) => yargsInstance.options(globalOptions),
         async (args) => {
           const format = getFormat(args.silent, args.compact, args.verbose);
+          const output = resolveOutputPathOption(args.output);
 
           if (args['pre-commit']) {
-            await preCommitHandler(args.output, format, args.types);
+            await preCommitHandler(output, format, args.types);
           } else {
             await generateVersionFile(
-              args.output,
+              output,
               format,
               args.types,
               args['git-hook'],
@@ -704,7 +716,7 @@ async function main() {
           const format = getFormat(args.silent, args.compact, args.verbose);
           await installCommand(
             args['increment-patch'],
-            args.output,
+            resolveOutputPathOption(args.output),
             format,
             args['non-interactive'],
             !args.fail,
@@ -809,7 +821,7 @@ async function main() {
           await bumpCommand(
             bumpType,
             customVersionsToUpdate,
-            args.output,
+            resolveOutputPathOption(args.output),
             format,
             args['non-interactive'],
             args.types,
@@ -834,8 +846,11 @@ async function main() {
             },
           }),
         async (args) => {
+          // The watcher still writes the generated file in BOTH modes; that
+          // hole is deliberate and filed as version-manager-70i.11, so it
+          // takes the resolved path and ignores the write policy.
           await watchCommand(
-            args.output,
+            args.output ?? DEFAULT_OUTPUT_PATH,
             args.debounce,
             args.silent,
             args.fail,

@@ -719,11 +719,13 @@ function incrementVersion(version: string, bumpType: BumpType): string | null {
  * Generate TypeScript definition file for dynamic version with explicit version types
  * @param outputPath - Path to the JSON file (will generate .d.ts alongside)
  * @param versionKeys - Keys from version-manager.json versions object
+ * @returns The path of the .d.ts file that was written, so callers can report
+ *   it without re-deriving the name
  */
 export function generateTypeDefinitions(
   outputPath: string,
   versionKeys: string[],
-): void {
+): string {
   // Replace .json extension with .d.ts
   const dtsPath = outputPath.replace(/\.json$/, '.d.ts');
 
@@ -752,6 +754,8 @@ export default version;
 `;
 
   writeFileSync(dtsPath, content);
+
+  return dtsPath;
 }
 
 /**

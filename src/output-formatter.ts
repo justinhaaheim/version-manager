@@ -16,9 +16,15 @@ export interface VersionOutputData {
   buildNumber: string;
   commitsSince: number;
   dirty: boolean;
-  dtsPath?: string;
+  dtsPath?: string | null;
   dynamicVersion: string;
-  outputPath: string;
+  /**
+   * Path the version file was written to, or null when nothing was written
+   * (package-json mode writes no generated file — see
+   * src/generated-file-policy.ts). null suppresses every "saved to" marker:
+   * output must not claim a write that did not happen.
+   */
+  outputPath: string | null;
   versions: Record<string, string>;
 }
 
@@ -61,11 +67,15 @@ function formatVerbose(data: VersionOutputData): string {
 
   lines.push(`   🌿 branch    ${data.branch}`);
   lines.push(`   🔨 build     ${data.buildNumber}`);
-  lines.push('');
-  lines.push(`   💾 → ${data.outputPath}`);
 
-  if (data.dtsPath) {
-    lines.push(`   📘 → ${data.dtsPath}`);
+  // Nothing written => no "saved to" section at all, not an empty one.
+  if (data.outputPath !== null) {
+    lines.push('');
+    lines.push(`   💾 → ${data.outputPath}`);
+
+    if (data.dtsPath) {
+      lines.push(`   📘 → ${data.dtsPath}`);
+    }
   }
 
   return lines.join('\n');
@@ -95,10 +105,14 @@ function formatNormal(data: VersionOutputData): string {
   }
 
   lines.push(`   └─ 🔨 ${data.buildNumber}`);
-  lines.push(`💾 → ${data.outputPath}`);
 
-  if (data.dtsPath) {
-    lines.push(`📘 → ${data.dtsPath}`);
+  // Nothing written => no "saved to" line.
+  if (data.outputPath !== null) {
+    lines.push(`💾 → ${data.outputPath}`);
+
+    if (data.dtsPath) {
+      lines.push(`📘 → ${data.dtsPath}`);
+    }
   }
 
   return lines.join('\n');
@@ -113,6 +127,9 @@ function formatNormal(data: VersionOutputData): string {
 function formatCompact(data: VersionOutputData): string {
   const dirtyIndicator = data.dirty ? '*' : '';
 
+  // The 💾✓ claims a file was saved, so it is dropped when none was.
+  const savedIndicator = data.outputPath === null ? '' : ' 💾✓';
+
   // Detect add-to-patch mode: dynamicVersion differs from base and doesn't contain '+'
   const isAddToPatch =
     data.dynamicVersion !== data.baseVersion &&
@@ -121,10 +138,10 @@ function formatCompact(data: VersionOutputData): string {
 
   if (isAddToPatch) {
     // Show derivation for add-to-patch mode: "0.4.6 (0.4.4+2)"
-    return `Dynamic version: ${data.dynamicVersion}${dirtyIndicator} (${data.baseVersion}+${data.commitsSince}) 🌿${data.branch} 💾✓`;
+    return `Dynamic version: ${data.dynamicVersion}${dirtyIndicator} (${data.baseVersion}+${data.commitsSince}) 🌿${data.branch}${savedIndicator}`;
   }
 
-  return `Dynamic version: ${data.dynamicVersion}${dirtyIndicator} 🌿${data.branch} 💾✓`;
+  return `Dynamic version: ${data.dynamicVersion}${dirtyIndicator} 🌿${data.branch}${savedIndicator}`;
 }
 
 /**
