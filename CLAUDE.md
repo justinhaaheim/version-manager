@@ -17,9 +17,9 @@
 ### How It Works
 
 1. **package.json** (committed): Standard npm version field is the base version
-2. **version-manager.json** (committed): Configuration with `runtimeVersion` and `versionCalculationMode`
-3. **dynamic-version.local.json** (gitignored): Generated file with `baseVersion`, `dynamicVersion`, `runtimeVersion`, and `buildNumber`
-4. **Git hooks**: Automatically regenerate version file on git operations
+2. **version-manager.json** (committed): Configuration — `versionCalculationMode`, `versionMode`, the `versions` map, and the `branchSuffix` / `mergeDriver` knobs. Every field is optional, and so is the file
+3. **dynamic-version.local.json** (gitignored): Generated file with `baseVersion`, `dynamicVersion`, `buildNumber`, `commitsSince` and the `versions` map — written in `dynamic-file` mode only
+4. **Git hooks**: Automatically regenerate version file on git operations (`dynamic-file` mode), or write the version into package.json before the commit (`package-json` mode)
 
 ## Development Commands
 
@@ -37,15 +37,15 @@
 
 ## CLI Commands
 
-The tool provides five main commands:
+The tool provides five main commands, plus two entry points git calls rather than a human: the `--pre-commit` flag (the `package-json` mode hook) and the hidden `merge-driver <ancestor> <ours> <theirs>` subcommand.
 
 ### 1. Generate Version File (default)
 ```bash
 npx @justinhaaheim/version-manager [options]
 bun run test:local  # For local development
 ```
-- Generates `dynamic-version.local.json` with computed versions
-- Prompts to create `version-manager.json` if missing
+- Generates `dynamic-version.local.json` with computed versions — in `dynamic-file` mode, or when `--output` is passed explicitly
+- Does NOT create `version-manager.json` when it is missing: the file is optional, `createDefaultVersionManagerConfig()` has no callers, and the defaults are used instead
 - Prompts to add `*.local.json` to .gitignore if missing
 
 **Options:**
@@ -58,18 +58,21 @@ bun run test:local  # For local development
 npx @justinhaaheim/version-manager install [options]
 bun run test:local:install  # For local development
 ```
-- Installs git hooks (post-commit, post-checkout, post-merge, post-rewrite)
-- Adds scripts to package.json (including prebuild, predev, prestart hooks)
-- Generates initial version file
+- In `dynamic-file` mode: installs post-commit, post-checkout, post-merge and post-rewrite hooks, adds the lifecycle scripts (prebuild, predev, prestart), and generates the initial version file
+- In `package-json` mode: installs a `pre-commit` hook and NOTHING else — no post-* hooks, no lifecycle scripts, no gitignore entries, no generated file. It also registers the merge driver, but only when `mergeDriver.enabled` is on
+- Does NOT remove the other mode's hooks, scripts or generated file when the mode changes
 - Works with standard .git/hooks and Husky
 
-**Scripts added:**
-- `dynamic-version:generate` - Generate version file
+**Scripts added** (`dynamic-file` mode; the lifecycle four are skipped in `package-json` mode):
+- `dynamic-version` and `dynamic-version:generate` - Generate version file
 - `dynamic-version:install` - Reinstall git hooks and scripts
 - `dynamic-version:install-scripts` - Update scripts only
+- `prepare` - Regenerate after `npm install`, with `--no-fail`
 - `prebuild` - Auto-regenerate version before `npm run build`
 - `predev` - Auto-regenerate version before `npm run dev`
 - `prestart` - Auto-regenerate version before `npm run start`
+
+The three `pre*` scripts are written as a bare `npx @justinhaaheim/version-manager`, with no `--silent --no-fail` — the flagged versions are commented out in `script-manager.ts`.
 
 **Options:**
 - `--increment-patch`: Increment patch version with each commit (deprecated in favor of file-based system)
@@ -80,15 +83,15 @@ bun run test:local:install  # For local development
 ```bash
 npx @justinhaaheim/version-manager bump [options]
 ```
-- Increments version in `version-manager.json` based on current computed version
+- Increments the version in `package.json` based on the current computed version
 - Regenerates `dynamic-version.local.json`
 - Optionally commits the change
 
 **Options:**
+- `[versions..]` (positional): Custom version names from the `versions` map to sync, e.g. `bump runtime`
 - `--major`: Bump major version (e.g., 1.2.3 → 2.0.0)
 - `--minor`: Bump minor version (e.g., 1.2.3 → 1.3.0)
 - `--patch`: Bump patch version (e.g., 1.2.3 → 1.2.4) - **default**
-- `--runtime, -r`: Also update runtimeVersion to match dynamicVersion
 - `--commit, -c`: Auto-commit the version change
 - `--tag, -t`: Create git tag (requires --commit)
 - `--push, -p`: Push commit and tag to remote (requires --commit)
@@ -99,7 +102,7 @@ npx @justinhaaheim/version-manager bump [options]
 npx @justinhaaheim/version-manager bump                    # Bump patch (default)
 npx @justinhaaheim/version-manager bump --minor            # Bump minor version
 npx @justinhaaheim/version-manager bump --commit           # Bump and commit
-npx @justinhaaheim/version-manager bump --runtime          # Bump code + runtime
+npx @justinhaaheim/version-manager bump runtime            # Bump code + sync versions.runtime
 npx @justinhaaheim/version-manager bump --commit --tag     # Bump, commit, and tag
 npx @justinhaaheim/version-manager bump -c -t -p           # Bump, commit, tag, and push
 ```
@@ -150,17 +153,22 @@ npx @justinhaaheim/version-manager watch --silent           # Silent mode
 src/
   index.ts                  # CLI entry point, yargs command definitions
   version-generator.ts      # Core version calculation logic
+  branch-suffix.ts          # The branchSuffix knob: sanitising, counting, applying
+  generated-file-policy.ts  # Whether this mode writes dynamic-version.local.json at all
+  json-text-edit.ts         # Surgical text edits to one JSON value, formatting preserved
+  merge-driver.ts           # The package.json merge driver and its registration
+  output-formatter.ts       # Rendering the CLI's version output
   git-utils.ts             # Git commands (describe, log, commit tracking)
   git-hooks-manager.ts     # Git hook installation/update logic
   script-manager.ts        # package.json script management
   metro-plugin.ts          # Metro bundler plugin for auto-regeneration
   watcher.ts               # File watcher for auto-regeneration
   reader.ts                # Public API for reading version files
-  types.ts                 # TypeScript type definitions
+  types.ts                 # Zod schemas and the types inferred from them
 
 docs/
-  plans/                   # Development planning documents
-  prompts/                 # Guidelines for AI assistance
+  plans/                   # Historical planning documents. Do NOT add to these:
+                           # beads replaced them (see the critical rules)
 ```
 
 ### File Responsibilities (Detailed)
@@ -168,18 +176,45 @@ docs/
 **index.ts** (CLI)
 - Entry point when run as `npx @justinhaaheim/version-manager`
 - Uses yargs for command parsing
-- Four commands: default (generate), install, install-scripts, bump
-- Handles user prompts for .gitignore and version-manager.json
+- Commands: default (generate), install, install-scripts, bump, watch, and the hidden `merge-driver` that git invokes
+- The `--pre-commit` flag on the default command is the `package-json` mode hook
+- Handles the .gitignore prompt (there is no version-manager.json prompt)
 - Orchestrates calls to other modules
 - Includes `require.main === module` check for direct execution
 
 **version-generator.ts** (Core Logic)
 - `generateFileBasedVersion()`: Main function for file-based versioning
-- `createDefaultVersionManagerConfig()`: Creates version-manager.json with defaults
+- `generatePreCommitVersionData()`: The `package-json` mode computation, run from the pre-commit hook
+- `getVersionMode()` / `isMergeDriverEnabled()`: Read one knob each out of version-manager.json
+- `createDefaultVersionManagerConfig()`: Writes a default version-manager.json — exported but with NO callers; nothing creates that file today
 - `parseGitDescribe()`: Parses git describe output (legacy, still used internally)
 - `calculateCodeVersion()`: Implements both calculation modes
 - `formatHumanReadable()`: Legacy function for human-readable versions
 - `generateVersion()`: Legacy tag-based version generation (kept for compatibility)
+
+**branch-suffix.ts** (The `branchSuffix` knob)
+- `sanitizeBranchName()`: The exact sanitisation rules documented in the README
+- `applyBranchSuffix()` / `stripPrerelease()`: Put the prerelease on, and take whatever prerelease is there off
+- `isSuffixExemptBranch()`: Main branches and detached HEAD get no suffix
+- `decideBranchSuffix()`: Turns two commit measurements into a decision, or into a warning when neither measurement worked — a failed count never becomes a `0`
+
+**generated-file-policy.ts** (Does this mode write a file at all?)
+- `shouldWriteGeneratedFiles()`: THE decision, in one place — `package-json` mode writes nothing unless `--output` was passed explicitly
+- `resolveOutputPathOption()`: Distinguishes "the user typed --output" from "nobody typed anything", which a yargs default would erase
+- `writeGeneratedFiles()`: Writes the JSON and its .d.ts, or returns nulls meaning deliberately-not-written
+
+**json-text-edit.ts** (Surgical JSON edits)
+- `findTopLevelStringValueSpan()` / `replaceTopLevelStringValue()`: Replace one top-level string value in JSON *text*
+- Used instead of parse-and-stringify so formatting, key order and every other byte of package.json survive a version bump
+
+**merge-driver.ts** (package.json merge driver)
+- `runMergeDriver()`: The driver git invokes; takes OUR version and hands the rest to `git merge-file`
+- `registerMergeDriver()`: Writes the .gitattributes line and the git config entries, driver key first
+- Registered by `install` only in `package-json` mode AND only when `mergeDriver.enabled` is on
+
+**output-formatter.ts** (CLI output)
+- `formatVersionOutput()`: Renders the silent / compact / normal / verbose forms
+- `OutputFormat` and `VersionOutputData`: the shapes the CLI passes in
 
 **git-utils.ts** (Git Operations)
 - `isGitRepository()`: Check if cwd is a git repo
@@ -240,7 +275,7 @@ docs/
 ### Version Calculation Algorithm
 
 1. Read base version from `package.json` version field
-2. Read `version-manager.json` for `versionCalculationMode` and `runtimeVersion`
+2. Read `version-manager.json` for `versionCalculationMode`, `versionMode` and the knobs
 3. Find last commit where `package.json` version field **value** changed (not just file modification)
 4. Count commits from that point to HEAD
 5. **Detect uncommitted version changes**: If the working tree version differs from the version at the last commit where it changed, treat as 0 commits (prevents showing `0.2.0+20` after bumping to `0.2.0` but before committing)
@@ -257,34 +292,55 @@ docs/
 - Makes hooks executable (chmod 755)
 - Respects `core.hooksPath` git config
 
+### Version modes and the two knobs
+
+**The README is the source of truth for all three. Read it before changing any of them, and put behaviour changes there rather than duplicating them here.**
+
+- **`versionMode`** — `dynamic-file` (default) writes the computed version to the gitignored generated file after the fact, via `post-*` hooks. `package-json` writes it into the `version` field of `package.json` *before* the commit, via a `pre-commit` hook, so the committed `package.json` carries the real version and a consumer needs neither `.git` nor a generated file. `package-json` mode is for linear history: amend double-bumps, rebase never re-runs the hook, and an auto-merge commit keeps a stale version. See "Version Modes: where the computed version ends up" in the README.
+- **`branchSuffix`** — off by default. Adds a semver prerelease naming the branch (`0.32.3-feat-x.3`) on branches that are not in `mainBranches`. While it is on, **version-manager owns the prerelease segment**: every computation strips whatever prerelease it finds and re-applies its own, so a hand-authored `1.0.0-beta.1` is discarded. That is what stops the suffix compounding when it is committed and read back in `package-json` mode. See "Branch Name Suffix (opt-in)" in the README.
+- **`mergeDriver`** — off by default, and it needs `versionMode: 'package-json'` as well. Registers a git merge driver that resolves `package.json` version conflicts to OURS. It is off by default because a registered driver whose *command* cannot run turns a merge into a conflict with no markers in it, which an author can stage away and lose the other side. See "The package.json merge driver" in the README.
+
+When you add a knob: declare it in `VersionManagerConfigSchema` (the schema is `.strict()`, so an undeclared field makes the whole config fail to parse and silently read as absent), give it a Zod default, add it to both config literals in `version-generator.ts`, and default it to the safe side.
+
 ## Core Data Structures
 
 ### VersionManagerConfig (version-manager.json)
 ```typescript
 {
-  runtimeVersion: string;            // e.g., "0.1.0" - OTA update compatibility version
   versionCalculationMode: 'add-to-patch' | 'append-commits';
+  versionMode: 'dynamic-file' | 'package-json';        // default 'dynamic-file'
+  versions: Record<string, string>;                    // e.g., {runtime: "0.1.0"}; default {}
+  branchSuffix: {enabled: boolean; mainBranches: string[]};  // default {false, ['main','master']}
+  mergeDriver: {enabled: boolean};                     // default {enabled: false}
+  outputFormat?: 'silent' | 'compact' | 'normal' | 'verbose';
 }
 ```
-- **Committed to git** - Configuration for runtime version and calculation mode
-- Base version is now stored in standard `package.json` version field
+- **Committed to git** - Configuration for the calculation mode, the version mode and the knobs
+- The schema is `.strict()`: an unknown field makes the whole file fail the current schema
+- Every field above is optional in the file; the Zod defaults fill in what is missing
+- The legacy shape — a top-level `runtimeVersion` — is still accepted by `LegacyVersionManagerConfigSchema`, migrated to `versions.runtime`, and rewritten to disk with a message. It is NOT rejected; it is migrated
+- Base version is stored in the standard `package.json` version field
 
 ### DynamicVersion (dynamic-version.local.json)
 ```typescript
 {
+  _generated: string;                // "This file is auto-generated by ... Do not edit."
   baseVersion: string;               // e.g., "0.1.0" - Raw version from package.json
   dynamicVersion: string;            // e.g., "0.1.3" or "0.1.0+3" - Computed version
-  runtimeVersion: string;            // e.g., "0.1.0" - Copied from config
+  versions: Record<string, string>;  // e.g., {runtime: "0.1.0"} - Copied from config
   buildNumber: string;               // e.g., "20251023.143245.67" - Generated timestamp
+  commitsSince: number;              // Commits since the base version last changed
   branch: string;                    // e.g., "main" - Current git branch
   dirty: boolean;                    // true if uncommitted changes
   generationTrigger: 'git-hook' | 'cli';  // What triggered generation
-  timestamp: string;                 // ISO 8601 timestamp
+  timestamp: string;                 // Date#toString(), not ISO 8601
+  timestampUnix: number;             // Date.now()
 }
 ```
 - **Gitignored** - Generated by CLI, never committed
 - Regenerated on git operations (commit, checkout, merge, rebase)
 - Consumed by app.config.js, build scripts, app code
+- **`dynamic-file` mode only.** In `package-json` mode nothing writes this file unless `--output` is passed explicitly
 
 ### VersionInfo (Legacy)
 ```typescript
@@ -360,7 +416,7 @@ docs/
 **For consumers (using as library):**
 ```typescript
 import { readDynamicVersion } from '@justinhaaheim/version-manager/reader';
-const { baseVersion, dynamicVersion, runtimeVersion, buildNumber } = readDynamicVersion();
+const { baseVersion, dynamicVersion, versions, buildNumber } = readDynamicVersion();
 ```
 
 **For CLI users:**
@@ -392,15 +448,15 @@ npm run dynamic-version:generate
 - **Development mode**: Detects `@justinhaaheim/version-manager` package name, uses `bun run test:local`
 
 ### Version Calculation
-- **No version-manager.json**: Returns default "0.1.0"
+- **No version-manager.json**: The Zod defaults apply — `append-commits`, `dynamic-file`, both knobs off. The base version still comes from `package.json`
 - **Invalid calculation mode**: Falls back to "add-to-patch"
 - **Invalid semver in base**: Returns base version as-is (no calculation)
-- **BUILD_NUMBER not set**: buildNumber field omitted from output
+- **buildNumber**: Always generated from the clock, in the iOS-compatible timestamp format. Nothing reads a `BUILD_NUMBER` environment variable
 
 ### File Operations
 - **Missing .gitignore**: Prompts user to add `*.local.json`
-- **Missing version-manager.json**: Prompts user to create with defaults
-- **Corrupted JSON**: Error thrown, user must fix manually
+- **Missing version-manager.json**: Nothing is created and nothing is asked; the defaults are used
+- **Corrupted JSON**: The config is reported as unreadable and the defaults are used, which means a typo'd knob reads as off. Check the warning
 - **Output path doesn't exist**: Parent directory must exist (not created automatically)
 
 ## Module Organization
@@ -424,14 +480,27 @@ bun test <file>             # Run specific test file
 - `tests/unit/` - Pure unit tests (no git repos needed)
   - `output-formatter.test.ts` - Output formatting tests
   - `git-utils.test.ts` - Git utility function tests
+  - `branch-suffix.test.ts` - Sanitising, stripping, applying, and the n decision
+  - `json-text-edit.test.ts` - The surgical JSON value replacer
+  - `merge-driver.test.ts` - The driver's fallbacks, and the mergeDriver config knob
+  - `generated-file-policy.test.ts` - Which mode writes a file
+  - `pre-commit-version.test.ts` - The pre-commit version arithmetic
+  - `version-replacement-guard.test.ts` - The post-condition that a replacement took
 - `tests/integration/` - Integration tests with temporary git repos
   - `version-generation.test.ts` - Core version calculation tests
+  - `package-json-mode.test.ts` - The whole of `package-json` mode, including its measured limitations
+  - `branch-suffix.test.ts` - The suffix end to end, through real commits
+  - `merge-driver.test.ts` - Real git merges, and the knob that gates registration
+  - `generated-file-policy.test.ts` - What install writes in each mode
   - `cli-output.test.ts` - CLI output format tests
   - `config-migration.test.ts` - Config migration tests
   - `git-hooks.test.ts` - Hook installation tests (may be flaky)
   - `watcher.test.ts` - File watcher tests (may be flaky)
 - `tests/helpers/` - Test utilities and fixtures
 - `tests/smoke.test.ts` - Basic infrastructure tests
+- `src/output-formatter.test.ts` - One test file lives beside its source rather than under `tests/`
+
+New integration tests need an explicit per-test timeout of at least 20000ms: under full-suite load they otherwise hit bun's 5s default and report as failures.
 
 ### Quick Sanity Check (Local)
 Use these commands for quick sanity checks during development:
@@ -474,10 +543,12 @@ To bump the base version manually:
 3. The next commit after this will calculate from the new base (e.g., 0.2.1 with one commit)
 
 To update runtime version (only when native changes require it):
-1. Edit `runtimeVersion` in `version-manager.json`
+1. Edit `versions.runtime` in `version-manager.json`
 2. Commit the change
 
 ## Version File Regeneration
+
+All of this is `dynamic-file` mode. In `package-json` mode there is no generated file to regenerate: a `pre-commit` hook writes the version into `package.json` instead, and none of the four post-\* hooks are installed. (The watcher and the metro plugin below have not been taught that yet and still write the file in both modes.)
 
 The `dynamic-version.local.json` file is automatically regenerated in two ways:
 
@@ -496,7 +567,7 @@ When scripts are installed via `install` command, npm lifecycle hooks regenerate
 
 This ensures the version file is always fresh when starting dev servers or building for production, even if you haven't committed recently.
 
-**Note:** Build hooks use `--silent --no-fail` flags to avoid breaking builds if version generation encounters issues.
+**Note:** `prepare` carries `--no-fail`, but `prebuild` / `predev` / `prestart` are installed as a bare `npx @justinhaaheim/version-manager` today, so a failed generation DOES fail the build. The `--silent --no-fail` variants are sitting commented out in `script-manager.ts`.
 
 ### 3. Metro Plugin (Automatic - React Native/Expo)
 For React Native and Expo projects using Metro bundler, you can auto-regenerate the version file on every bundle without causing infinite rebuild loops:
