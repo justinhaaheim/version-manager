@@ -7,15 +7,23 @@ import {hideBin} from 'yargs/helpers';
 import yargs from 'yargs/yargs';
 
 import packageJson from '../package.json';
+import {VERSION_LOG_FILENAME} from './event-log';
+import {
+  appendCommitEvent,
+  ensureUnionMergeAttribute,
+  ensureVersionLogExists,
+  UNION_MERGE_ATTRIBUTE,
+} from './event-log-mode';
 import {
   DEFAULT_OUTPUT_PATH,
+  type GeneratedFileWriteResult,
   type OutputPathOption,
   resolveOutputPathOption,
   shouldWriteGeneratedFiles,
   writeGeneratedFiles,
 } from './generated-file-policy';
 import {detectRunCommand, installGitHooks} from './git-hooks-manager';
-import {isFileTrackedByGit} from './git-utils';
+import {getCurrentBranch, isFileTrackedByGit} from './git-utils';
 import {
   MERGE_DRIVER_ATTRIBUTE,
   registerMergeDriver,
@@ -34,9 +42,12 @@ import {
   readPackageJson,
   writePreCommitVersion,
 } from './script-manager';
+import {type DynamicVersion} from './types';
 import {
+  bumpEventLogVersion,
   type BumpType,
   bumpVersion,
+  generateEventLogVersionData,
   generateFileBasedVersion,
   generatePreCommitVersionData,
   getVersionMode,
@@ -274,6 +285,117 @@ async function generateVersionFile(
   }
 }
 
+/**
+ * Print a computed version, in whatever format is in force.
+ *
+ * One place rather than a fourth copy of the same eleven-line object literal.
+ * The two older paths still build theirs inline; folding them onto this is a
+ * separate change, deliberately not made here, because their output is
+ * snapshot-tested and this bead must not touch the other two modes.
+ */
+function reportVersion(
+  versionData: DynamicVersion,
+  written: GeneratedFileWriteResult,
+  format: OutputFormat,
+  warnings: string[],
+): void {
+  if (format === 'silent') {
+    return;
+  }
+
+  for (const warning of warnings) {
+    console.warn(warning);
+  }
+
+  const outputData: VersionOutputData = {
+    baseVersion: versionData.baseVersion,
+    branch: versionData.branch,
+    buildNumber: versionData.buildNumber,
+    commitsSince: versionData.commitsSince,
+    dirty: versionData.dirty,
+    dtsPath: written.dtsPath,
+    dynamicVersion: versionData.dynamicVersion,
+    outputPath: written.jsonPath,
+    versions: versionData.versions,
+  };
+
+  console.log(formatVersionOutput(outputData, format));
+}
+
+/**
+ * EVENT-LOG MODE: report the version derived from version.jsonl.
+ *
+ * Writes nothing unless --output was given explicitly (the shared decision in
+ * generated-file-policy). There is no generated file in this mode: the log is
+ * committed and the version comes out of it on demand.
+ */
+async function generateEventLogVersionFile(
+  output: OutputPathOption,
+  format: OutputFormat | null,
+  generateTypes: boolean,
+  trigger: 'cli' | 'git-hook',
+): Promise<void> {
+  const {versionData, configuredFormat, warnings} =
+    await generateEventLogVersionData(trigger);
+
+  const written = writeGeneratedFiles({
+    generateTypes,
+    output,
+    versionData,
+    versionMode: 'event-log',
+  });
+
+  reportVersion(
+    versionData,
+    written,
+    format ?? configuredFormat ?? 'compact',
+    warnings,
+  );
+}
+
+/**
+ * EVENT-LOG MODE's pre-commit hook (version-manager-cza, E9).
+ *
+ * Appends ONE commit event to version.jsonl, in the working tree and in the
+ * git index, and writes nothing else — no package.json version, no generated
+ * file. A failure throws and the commit aborts (E10, 70i.4's contract): a
+ * commit that silently records no event is a hole in the evidence, and the
+ * count is only meaningful because every hooked commit is in the log.
+ */
+async function preCommitEventLogHandler(
+  output: OutputPathOption,
+  format: OutputFormat | null,
+  generateTypes: boolean,
+): Promise<void> {
+  const branch = await getCurrentBranch();
+  const append = appendCommitEvent(branch, new Date());
+
+  // Derived AFTER the append, so the number reported is the number the commit
+  // will carry. No +1 fudge: the evidence is already in the log.
+  const {versionData, configuredFormat, warnings} =
+    await generateEventLogVersionData('git-hook');
+
+  const written = writeGeneratedFiles({
+    generateTypes,
+    output,
+    versionData,
+    versionMode: 'event-log',
+  });
+
+  if (append.indexOutcome === 'added') {
+    warnings.push(
+      `ℹ️  ${VERSION_LOG_FILENAME} was not staged, so it was added to this commit.`,
+    );
+  }
+
+  reportVersion(
+    versionData,
+    written,
+    format ?? configuredFormat ?? 'compact',
+    warnings,
+  );
+}
+
 // Pre-commit handler for package-json mode
 async function preCommitHandler(
   output: OutputPathOption,
@@ -376,7 +498,10 @@ async function installCommand(
   // The gitignore entries follow the first; the hooks and lifecycle scripts,
   // which never pass --output, follow the second.
   const writesGeneratedFiles = shouldWriteGeneratedFiles(versionMode, output);
-  const usesGeneratedFile = versionMode !== 'package-json';
+  // Only dynamic-file mode produces dynamic-version.local.json. package-json
+  // mode writes package.json; event-log mode writes version.jsonl; neither
+  // wants the lifecycle scripts that exist only to regenerate that file.
+  const usesGeneratedFile = versionMode === 'dynamic-file';
 
   if (writesGeneratedFiles) {
     // Determine filenames for gitignore check
@@ -398,8 +523,46 @@ async function installCommand(
     );
   }
 
+  // EVENT-LOG MODE's whole setup (version-manager-cza, E4 and E6): the log
+  // itself, and the one .gitattributes line that makes every merge of it a
+  // union instead of a conflict. Both are idempotent, and both happen BEFORE
+  // the version is reported so that the first install has something to read.
+  //
+  // Nothing here is caught: an install that says it succeeded while the union
+  // attribute is missing would leave the user to discover it at their first
+  // merge conflict, looking at git rather than at us.
+  if (versionMode === 'event-log') {
+    const log = ensureVersionLogExists();
+    const attribute = ensureUnionMergeAttribute();
+
+    if (attribute === 'claimed-by-another') {
+      console.warn(
+        `⚠️  .gitattributes already points ${VERSION_LOG_FILENAME} at a different merge driver, so it was left alone. Add \`${UNION_MERGE_ATTRIBUTE}\` yourself, or merges of the version log will conflict.`,
+      );
+    }
+
+    if (!silent) {
+      console.log(`\n📓 Setting up the event log...`);
+      console.log(`   ${VERSION_LOG_FILENAME}: ${log}`);
+      console.log(`   .gitattributes (${UNION_MERGE_ATTRIBUTE}): ${attribute}`);
+      console.log(
+        `   Commit both. The log must be tracked, and the attribute must be`,
+      );
+      console.log(`   on every branch for the union merge to apply.`);
+    }
+  }
+
   // Generate the version file
-  await generateVersionFile(output, format, generateTypes, gitHook);
+  if (versionMode === 'event-log') {
+    await generateEventLogVersionFile(
+      output,
+      format,
+      generateTypes,
+      gitHook ? 'git-hook' : 'cli',
+    );
+  } else {
+    await generateVersionFile(output, format, generateTypes, gitHook);
+  }
 
   if (!silent) {
     console.log('\n📦 Installing git hooks...');
@@ -463,6 +626,16 @@ async function installCommand(
       );
       console.log(
         '   No post-* hooks installed: this mode writes no dynamic-version.local.json',
+      );
+    } else if (versionMode === 'event-log') {
+      console.log(
+        `   Pre-commit hook will append one commit event to ${VERSION_LOG_FILENAME}`,
+      );
+      console.log(
+        '   No post-* hooks installed: this mode writes no dynamic-version.local.json',
+      );
+      console.log(
+        '   Nothing stores a computed version, so nothing can go stale',
       );
     } else {
       console.log('   Hooks will auto-update dynamic-version.local.json on:');
@@ -598,9 +771,24 @@ async function bumpCommand(
   gitHook = false,
 ): Promise<void> {
   const silent = format === 'silent';
+  const versionMode = getVersionMode();
+  const eventLogMode = versionMode === 'event-log';
 
-  // Bump the version
-  const result = await bumpVersion(bumpType, customVersionsToUpdate, silent);
+  // Bump the version.
+  //
+  // In event-log mode that means appending a base event (E2): package.json is
+  // not touched, and the custom `versions` in version-manager.json are not a
+  // thing this mode syncs, so naming any is an error rather than a silent
+  // no-op.
+  if (eventLogMode && customVersionsToUpdate.length > 0) {
+    throw new Error(
+      `event-log mode does not sync custom versions, so ${customVersionsToUpdate.join(', ')} cannot be bumped. Remove them from the command.`,
+    );
+  }
+
+  const result = eventLogMode
+    ? await bumpEventLogVersion(bumpType, silent)
+    : await bumpVersion(bumpType, customVersionsToUpdate, silent);
 
   // Regenerate dynamic version file.
   //
@@ -609,7 +797,7 @@ async function bumpCommand(
   // The write decision is the same single decision generateVersionFile() makes
   // below, so both read it from shouldWriteGeneratedFiles().
   if (!silent) {
-    if (shouldWriteGeneratedFiles(getVersionMode(), output)) {
+    if (shouldWriteGeneratedFiles(versionMode, output)) {
       // The default wording is left exactly as it was, so dynamic-file mode's
       // output is unchanged; an explicit --output names the path the user chose.
       const target = output.explicit
@@ -622,7 +810,17 @@ async function bumpCommand(
       );
     }
   }
-  await generateVersionFile(output, format, generateTypes, gitHook);
+
+  if (eventLogMode) {
+    await generateEventLogVersionFile(
+      output,
+      format,
+      generateTypes,
+      gitHook ? 'git-hook' : 'cli',
+    );
+  } else {
+    await generateVersionFile(output, format, generateTypes, gitHook);
+  }
 
   // Optionally commit
   if (commit) {
@@ -634,9 +832,16 @@ async function bumpCommand(
     const commitMessage = message ?? `Bump version to ${result.newVersion}`;
 
     try {
-      // Stage package.json (always) and version-manager.json (if custom versions were updated)
+      // Stage what this mode actually changed. In event-log mode that is the
+      // log and nothing else: package.json is deliberately untouched (E11),
+      // and `git add`ing it here would sweep in whatever else the author has
+      // edited in it.
       // TODO: Extract these CLI calls to git-utils so we have a function to call for `gitAddPackageJson`, etc instead of manually writing out the commands here
-      execSync('git add package.json', {stdio: 'pipe'});
+      if (eventLogMode) {
+        execSync(`git add ${VERSION_LOG_FILENAME}`, {stdio: 'pipe'});
+      } else {
+        execSync('git add package.json', {stdio: 'pipe'});
+      }
       if (result.updatedVersions.length > 0) {
         execSync('git add version-manager.json', {stdio: 'pipe'});
       }
@@ -705,7 +910,14 @@ async function bumpCommand(
       throw error;
     }
   } else if (!silent) {
-    let tip = `\n💡 Tip: Commit this change with: git add version-manager.json && git commit -m "Bump version to ${result.newVersion}"`;
+    // Name the file this mode actually changed. In event-log mode the bump is
+    // one appended line in the log, and telling the author to stage
+    // version-manager.json would stage nothing and commit nothing. The other
+    // modes' wording is left exactly as it was.
+    const bumpedFile = eventLogMode
+      ? VERSION_LOG_FILENAME
+      : 'version-manager.json';
+    let tip = `\n💡 Tip: Commit this change with: git add ${bumpedFile} && git commit -m "Bump version to ${result.newVersion}"`;
     if (tag && !commit) {
       tip += `\n💡 Note: --tag requires --commit to create a git tag`;
     }
@@ -785,6 +997,23 @@ async function main() {
         async (args) => {
           const format = getFormat(args.silent, args.compact, args.verbose);
           const output = resolveOutputPathOption(args.output);
+
+          // Event-log mode derives from version.jsonl rather than from
+          // package.json's history, so it takes its own path through both the
+          // hook and the plain read (version-manager-cza, E3).
+          if (getVersionMode() === 'event-log') {
+            if (args['pre-commit']) {
+              await preCommitEventLogHandler(output, format, args.types);
+            } else {
+              await generateEventLogVersionFile(
+                output,
+                format,
+                args.types,
+                args['git-hook'] ? 'git-hook' : 'cli',
+              );
+            }
+            return;
+          }
 
           if (args['pre-commit']) {
             await preCommitHandler(output, format, args.types);

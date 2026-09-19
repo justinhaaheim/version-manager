@@ -146,19 +146,16 @@ export function readIndexEntry(path: string): GitIndexEntry | null {
 }
 
 /**
- * Write content back into the git index for an existing entry, changing
- * nothing else about the index.
+ * Hash `entry.content` and file it in the index at `entry.repoPath`.
  *
- * This is the surgical counterpart to `git add`: `git add` replaces the index
- * entry with whatever the WORKING TREE currently holds, which is how an
- * unstaged half-finished edit gets swept into a commit nobody staged it for.
- * hash-object + update-index writes exactly the bytes given.
- *
- * @param entry - The entry to write. `mode` and `repoPath` come straight from
- *   readIndexEntry(), so the entry is filed exactly where git had it.
+ * @param entry - The content, mode and repo-root-relative path
+ * @param allowNew - Whether a path that is not already in the index may be
+ *   added. False is the safe default: for a path that is supposed to exist,
+ *   "it is not in the index" is a fact worth failing on rather than papering
+ *   over by creating an entry.
  * @throws If git fails, or returns an object id we do not recognise
  */
-export function writeIndexEntry(entry: GitIndexEntry): void {
+function stageBlob(entry: GitIndexEntry, allowNew: boolean): void {
   const objectId = gitSync(
     ['hash-object', '-w', '--stdin'],
     entry.content,
@@ -172,9 +169,61 @@ export function writeIndexEntry(entry: GitIndexEntry): void {
 
   gitSync([
     'update-index',
+    ...(allowNew ? ['--add'] : []),
     '--cacheinfo',
     `${entry.mode},${objectId},${entry.repoPath}`,
   ]);
+}
+
+/**
+ * Write content back into the git index for an existing entry, changing
+ * nothing else about the index.
+ *
+ * This is the surgical counterpart to `git add`: `git add` replaces the index
+ * entry with whatever the WORKING TREE currently holds, which is how an
+ * unstaged half-finished edit gets swept into a commit nobody staged it for.
+ * hash-object + update-index writes exactly the bytes given.
+ *
+ * @param entry - The entry to write. `mode` and `repoPath` come straight from
+ *   readIndexEntry(), so the entry is filed exactly where git had it.
+ * @throws If git fails, or returns an object id we do not recognise
+ */
+export function writeIndexEntry(entry: GitIndexEntry): void {
+  stageBlob(entry, false);
+}
+
+/**
+ * Add a path to the git index that is not in it yet (version-manager-cza.1).
+ *
+ * The one case that needs this: event-log mode's first hooked commit in a
+ * repository where version.jsonl exists but has never been staged. Everything
+ * else goes through writeIndexEntry(), which refuses to invent an entry.
+ *
+ * `repoPath` MUST be repo-root-relative — `update-index --cacheinfo` resolves
+ * from the repository root, not from the current directory (measured,
+ * 2026-09-19; see readIndexEntry). Use repoRelativePath() to build it.
+ *
+ * @param entry - The content, mode (usually '100644') and repo-root path
+ * @throws If git fails, or returns an object id we do not recognise
+ */
+export function addIndexEntry(entry: GitIndexEntry): void {
+  stageBlob(entry, true);
+}
+
+/**
+ * Turn a path relative to the CURRENT DIRECTORY into one relative to the
+ * repository root, which is the only kind `update-index --cacheinfo` accepts.
+ *
+ * @param path - A path relative to the current directory, e.g. 'version.jsonl'
+ * @returns The same file, spelled from the repository root
+ * @throws If git fails (e.g. this is not a repository)
+ */
+export function repoRelativePath(path: string): string {
+  // `--show-prefix` prints the current directory relative to the repo root,
+  // with a trailing slash, or nothing at all at the root itself.
+  const prefix = gitSync(['rev-parse', '--show-prefix']).trim();
+
+  return `${prefix}${path}`;
 }
 
 export async function execCommand(command: string): Promise<string> {

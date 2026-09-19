@@ -6,7 +6,19 @@ export const VersionCalculationModeSchema = z.enum([
   'append-commits',
 ]);
 
-export const VersionModeSchema = z.enum(['dynamic-file', 'package-json']);
+/**
+ * The mode a project is in. 'dynamic-file' is the default and nothing changes
+ * for anyone who does not set this.
+ *
+ * 'event-log' (version-manager-cza, E1) commits an append-only `version.jsonl`
+ * and DERIVES the version from it; nothing stores a computed version, so
+ * nothing can be stale and merges need no policy. See src/event-log.ts.
+ */
+export const VersionModeSchema = z.enum([
+  'dynamic-file',
+  'event-log',
+  'package-json',
+]);
 
 export const OutputFormatSchema = z.enum([
   'silent',
@@ -85,3 +97,15 @@ export type LegacyVersionManagerConfig = z.infer<
 export type VersionManagerConfig = z.infer<typeof VersionManagerConfigSchema>;
 export type GenerationTrigger = z.infer<typeof GenerationTriggerSchema>;
 export type DynamicVersion = z.infer<typeof DynamicVersionSchema>;
+
+/**
+ * The calculation mode used when version-manager.json does not name one.
+ *
+ * Deliberately explicit rather than magic: 'append-commits' leaves the base
+ * version alone and adds `+N`. Lives here, next to the schema, because two
+ * readers now need it — the config reader in src/version-generator.ts and the
+ * git-free public reader in src/version-reader.ts — and two literals would
+ * drift.
+ */
+export const DEFAULT_VERSION_CALCULATION_MODE: VersionCalculationMode =
+  'append-commits';

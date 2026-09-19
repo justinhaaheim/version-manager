@@ -19,6 +19,16 @@ import {
   stripPrerelease,
 } from './branch-suffix';
 import {
+  countCommitEventsOnBranch,
+  type DerivedVersion,
+  deriveVersion,
+  describeSkippedLines,
+  parseEventLog,
+  readEventLogText,
+  VERSION_LOG_FILENAME,
+} from './event-log';
+import {appendBaseEvent} from './event-log-mode';
+import {
   countCommitsBetween,
   countCommitsOnHead,
   countCommitsSinceRef,
@@ -34,6 +44,7 @@ import {
   LegacyVersionManagerConfigSchema,
   VersionManagerConfigSchema,
 } from './types';
+import {calculateCodeVersion} from './version-math';
 
 /**
  * Migrate legacy config format to new format
@@ -101,52 +112,11 @@ function readVersionManagerConfig(configPath: string): {
 }
 
 /**
- * Calculate code version based on calculation mode
- * @param baseVersion - Base version from config
- * @param commitsSince - Number of commits since last base version change
- * @param mode - Calculation mode
- * @returns Calculated code version
+ * Re-exported from src/version-math.ts, where it now lives (see that file for
+ * why it moved). Every existing importer of
+ * `calculateCodeVersion` from this module keeps working.
  */
-export function calculateCodeVersion(
-  baseVersion: string,
-  commitsSince: number,
-  mode: VersionCalculationMode,
-): string {
-  if (commitsSince === 0) {
-    return baseVersion;
-  }
-
-  if (mode === 'add-to-patch') {
-    // Mode A: Add commits to patch version
-    const parts = baseVersion.split('.');
-    if (parts.length !== 3) {
-      return baseVersion; // Invalid semver format
-    }
-
-    const [major, minor, patch] = parts.map(Number);
-    if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
-      return baseVersion; // Invalid semver format
-    }
-
-    return `${major}.${minor}.${patch + commitsSince}`;
-  } else if (mode === 'append-commits') {
-    // Mode B: Append commit count
-    return `${baseVersion}+${commitsSince}`;
-  }
-
-  // Fallback to mode A if unrecognized mode
-  const parts = baseVersion.split('.');
-  if (parts.length !== 3) {
-    return baseVersion;
-  }
-
-  const [major, minor, patch] = parts.map(Number);
-  if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
-    return baseVersion;
-  }
-
-  return `${major}.${minor}.${patch + commitsSince}`;
-}
+export {calculateCodeVersion};
 
 /**
  * Reserved version names that cannot be used
@@ -667,6 +637,138 @@ export async function generatePreCommitVersionData(
 }
 
 /**
+ * EVENT-LOG MODE's version data (version-manager-cza, E3).
+ *
+ * The version is DERIVED from version.jsonl here and stored nowhere. Git is
+ * consulted only for the two facts the log does not carry — which branch this
+ * is and whether the tree is dirty — and never for the count, which is why
+ * this mode has no merge policy to get wrong.
+ *
+ * Deliberately NOT part of generateFileBasedVersion(): that function counts
+ * commits since package.json's version last changed, which is a completely
+ * different measurement. Sharing one function would mean a mode flag threaded
+ * through every step of it.
+ */
+export interface EventLogVersionResult {
+  /** Output format from config (if set) */
+  configuredFormat: 'silent' | 'compact' | 'normal' | 'verbose' | undefined;
+  /** What the log says, before the branch suffix is applied. */
+  derived: DerivedVersion;
+  /** The generated version data, for display and for an explicit --output. */
+  versionData: DynamicVersion;
+  /**
+   * Everything the user must be told: unreadable log lines, a fallen-back
+   * branch-suffix measurement. EMPTY MEANS "checked, nothing to report" —
+   * never "not checked" (critical rule 6).
+   */
+  warnings: string[];
+}
+
+/**
+ * Derive the version from version.jsonl.
+ *
+ * @param generationTrigger - What triggered the generation
+ * @param extraCommitsOnBranch - Commit events the log does not have yet. Zero
+ *   everywhere except... nowhere, currently: the pre-commit path appends its
+ *   event BEFORE calling this, so the log is already complete. Kept explicit
+ *   so that the +1 fudge package-json mode needs cannot creep back in
+ *   unnoticed.
+ * @returns The version data and everything that must be said about it
+ * @throws If this is not a git repository, or if there is nothing to derive a
+ *   version from at all
+ */
+export async function generateEventLogVersionData(
+  generationTrigger: GenerationTrigger = 'cli',
+  extraCommitsOnBranch = 0,
+): Promise<EventLogVersionResult> {
+  const configPath = join(process.cwd(), 'version-manager.json');
+
+  const isRepo = await isGitRepository();
+  if (!isRepo) {
+    throw new Error(
+      'Not a git repository. Please run this command in a git project.',
+    );
+  }
+
+  const branch = await getCurrentBranch();
+  const gitDescribe = await getGitDescribe();
+  const dirty = gitDescribe.includes('-dirty');
+
+  const {config: rawConfig} = readVersionManagerConfig(configPath);
+  const config = rawConfig ?? getDefaultVersionManagerConfig();
+
+  if (config.versions) {
+    validateVersionNames(config.versions);
+  }
+
+  const logText = readEventLogText(process.cwd());
+  const {events, skippedLines} = parseEventLog(logText ?? '');
+
+  const derived = deriveVersion({
+    calculationMode: config.versionCalculationMode,
+    events,
+    // E11: package.json's version stays an ordinary human-bumped semver and
+    // this mode never writes it. It is only the base when the log has no base
+    // event of its own.
+    packageVersion: getPackageVersion(),
+  });
+
+  const warnings: string[] = [];
+  const skippedWarning = describeSkippedLines(skippedLines);
+  if (skippedWarning !== null) {
+    warnings.push(skippedWarning);
+  }
+
+  // E12: the same branch-suffix module, but `n` is measured from the log
+  // rather than from git. Each commit event records the branch it happened
+  // on, so this is a real per-branch count and needs no merge-base.
+  const branchCommits =
+    countCommitEventsOnBranch(derived.countedCommits, branch) +
+    extraCommitsOnBranch;
+
+  const suffixDecision = decideBranchSuffix({
+    branch,
+    counts: {
+      mergeBase: {count: branchCommits, ref: 'version.jsonl'},
+      mergeBaseFailures: [],
+      total: branchCommits,
+    },
+    enabled: config.branchSuffix.enabled,
+    extraCommits: 0,
+    mainBranches: config.branchSuffix.mainBranches,
+  });
+
+  if (suffixDecision.warning !== null) {
+    warnings.push(suffixDecision.warning);
+  }
+
+  const dynamicVersion = decorateVersion(derived.version, suffixDecision);
+  const timestamps = generateTimestamps();
+
+  const versionData: DynamicVersion = {
+    _generated:
+      'This file is auto-generated by @justinhaaheim/version-manager. Do not edit.',
+    baseVersion: derived.base,
+    branch,
+    buildNumber: generateBuildNumber(),
+    commitsSince: derived.commitCount,
+    dirty,
+    dynamicVersion,
+    generationTrigger,
+    timestamp: timestamps.timestamp,
+    timestampUnix: timestamps.timestampUnix,
+    versions: config.versions ?? {},
+  };
+
+  return {
+    configuredFormat: config.outputFormat,
+    derived,
+    versionData,
+    warnings,
+  };
+}
+
+/**
  * Read the versionMode from version-manager.json config.
  * Returns 'dynamic-file' if config is missing or versionMode is not set.
  */
@@ -799,6 +901,48 @@ export default version;
   writeFileSync(dtsPath, content);
 
   return dtsPath;
+}
+
+/**
+ * Bump the base version in EVENT-LOG MODE by appending a base event (E2).
+ *
+ * package.json is NOT touched (E11), and no computed version is stored: the
+ * new base is one more line of evidence, and it merges by exactly the same
+ * union rule as everything else in the log.
+ *
+ * @param bumpType - major, minor or patch
+ * @param silent - Suppress console output
+ * @returns The old and new base versions
+ * @throws If the derived version is not a plain semver to increment
+ */
+export async function bumpEventLogVersion(
+  bumpType: BumpType,
+  silent = false,
+): Promise<BumpVersionResult> {
+  const {derived} = await generateEventLogVersionData('cli');
+
+  // Increment the DERIVED version, undecorated: a branch suffix is display
+  // only, and `0.1.0-feat-x.3` has no third dot-separated number to bump.
+  const oldVersion = derived.version;
+  const newVersion = incrementVersion(oldVersion, bumpType);
+
+  if (!newVersion) {
+    throw new Error(
+      `Invalid version format: ${oldVersion}. Expected semver format (e.g., 1.2.3)`,
+    );
+  }
+
+  appendBaseEvent(newVersion, new Date());
+
+  if (!silent) {
+    console.log('📈 Bumping version...');
+    console.log(`   Current: ${oldVersion}`);
+    console.log(`   New: ${newVersion}`);
+    console.log(`   Appended a base event to ${VERSION_LOG_FILENAME}`);
+    console.log('   package.json was not modified (event-log mode)');
+  }
+
+  return {newVersion, oldVersion, updatedVersions: []};
 }
 
 /**

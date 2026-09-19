@@ -57,16 +57,22 @@ export function resolveOutputPathOption(
  * that mode nothing is written — unless the user explicitly passed --output,
  * which is unambiguous intent and is honoured.
  *
+ * event-log mode (version-manager-cza) answers the same way and for the same
+ * reason: the committed version.jsonl is the deliverable, the version is
+ * derived from it on demand by src/version-reader.ts, and a generated file
+ * would be a second, staleable copy of a number this mode deliberately never
+ * stores. An explicit --output is still honoured — unambiguous intent.
+ *
  * dynamic-file mode is unchanged: it always writes.
  *
- * Both the CLI path (generateVersionFile) and the hook path
- * (preCommitHandler) call this, so they cannot drift apart.
+ * Both the CLI path (generateVersionFile) and the hook paths call this, so
+ * they cannot drift apart.
  */
 export function shouldWriteGeneratedFiles(
   versionMode: VersionMode,
   output: OutputPathOption,
 ): boolean {
-  if (versionMode === 'package-json') {
+  if (versionMode === 'package-json' || versionMode === 'event-log') {
     return output.explicit;
   }
 

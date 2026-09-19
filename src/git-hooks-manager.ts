@@ -311,9 +311,15 @@ export function installGitHooks(
   // once version-manager actually runs, but the npx resolution fails first.
   const nonFatalSuffix = ` || echo "WARNING: version-manager hook failed (non-fatal). If this is a fresh checkout/worktree, run 'bun install'."`;
 
-  if (versionMode === 'package-json') {
-    // Pre-commit hook: writes the computed version into package.json and into
-    // the git index.
+  if (versionMode === 'package-json' || versionMode === 'event-log') {
+    // Pre-commit hook. What it writes depends on the mode, and the CLI
+    // decides that — the hook command is identical:
+    //   package-json: the computed version, into package.json and the index
+    //   event-log:    one commit event, into version.jsonl and the index
+    //
+    // Neither mode installs post-* hooks (version-manager-70i.2 D12,
+    // version-manager-cza): their only job was regenerating
+    // dynamic-version.local.json, which neither mode produces.
     //
     // Deliberately NOT suffixed with nonFatalSuffix, and deliberately WITHOUT
     // noFailFlag (version-manager-70i.4, D10): if this hook fails the commit
