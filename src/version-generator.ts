@@ -322,6 +322,13 @@ export interface GenerateVersionResult {
   branchSuffixWarning: string | null;
   /** Output format from config (if set) */
   configuredFormat: 'silent' | 'compact' | 'normal' | 'verbose' | undefined;
+  /**
+   * Set when the pre-commit base version had to come from the working tree
+   * because package.json is absent from the git index (version-manager-70i.3,
+   * D9). null means the index was the source — or, on the paths that never
+   * read the index at all, that the question does not arise.
+   */
+  preCommitBaseWarning: string | null;
   /** The generated version data */
   versionData: DynamicVersion;
 }
@@ -449,6 +456,9 @@ export async function generateFileBasedVersion(
   return {
     branchSuffixWarning: suffixDecision.warning,
     configuredFormat: config.outputFormat,
+    // This path reads package.json from the working tree by design; it is not
+    // making a commit, so the index is not the question being asked.
+    preCommitBaseWarning: null,
     versionData,
   };
 }
@@ -554,14 +564,23 @@ export async function generatePreCommitVersionData(
   const gitDescribe = await getGitDescribe();
   const dirty = gitDescribe.includes('-dirty');
 
-  // Read current version. Isolated behind a named helper so that 70i.3 can
-  // switch the source to the git index without touching anything below.
-  const rawCurrentVersion = readPreCommitBaseVersion();
-  if (!rawCurrentVersion) {
+  // Read the current version from the git INDEX — what the commit is actually
+  // made from (version-manager-70i.3, D9). Unstaged edits in the working-tree
+  // package.json therefore do not steer the calculation.
+  const baseVersionRead = readPreCommitBaseVersion();
+  if (baseVersionRead === null) {
     throw new Error(
       'No version found in package.json. Please add a "version" field to your package.json.',
     );
   }
+
+  const rawCurrentVersion = baseVersionRead.version;
+
+  // D9's documented fallback is never silent: the index was not the source.
+  const preCommitBaseWarning =
+    baseVersionRead.source === 'working-tree'
+      ? '⚠️  package.json is not in the git index, so the version was read from the working tree. Run `git add package.json` to track it.'
+      : null;
 
   // Read config
   const {config: rawConfig, migrated} = readVersionManagerConfig(configPath);
@@ -633,6 +652,7 @@ export async function generatePreCommitVersionData(
   return {
     branchSuffixWarning: suffixDecision.warning,
     configuredFormat: config.outputFormat,
+    preCommitBaseWarning,
     versionData,
   };
 }

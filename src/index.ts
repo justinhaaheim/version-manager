@@ -280,8 +280,12 @@ async function preCommitHandler(
   const silent = format === 'silent';
 
   // Generate version data with pre-commit calculation (+1 for the about-to-happen commit)
-  const {versionData, configuredFormat, branchSuffixWarning} =
-    await generatePreCommitVersionData('git-hook');
+  const {
+    versionData,
+    configuredFormat,
+    branchSuffixWarning,
+    preCommitBaseWarning,
+  } = await generatePreCommitVersionData('git-hook');
 
   // Same single decision as the CLI path above: in package-json mode this
   // writes nothing, which is the whole point of the mode (D12). package.json
@@ -293,7 +297,8 @@ async function preCommitHandler(
     versionMode: getVersionMode(),
   });
 
-  // Mirror dynamicVersion to package.json
+  // Write dynamicVersion into BOTH the git index and the working-tree
+  // package.json, surgically (version-manager-70i.3, D9).
   const success = writePreCommitVersion(versionData.dynamicVersion);
   if (!success) {
     throw new Error('Failed to update package.json version');
@@ -302,8 +307,12 @@ async function preCommitHandler(
   // Update lockfile
   updateLockfile(silent);
 
-  // Stage package.json + lockfile
-  const filesToStage = ['package.json'];
+  // Stage the lockfile only. package.json is DELIBERATELY not staged here:
+  // writePreCommitVersion() has already put the new version into the index by
+  // hand, and `git add package.json` would replace that with the whole
+  // working-tree file — sweeping any unstaged edit into a commit the author
+  // never staged it for. That is the bug version-manager-70i.3 fixes.
+  const filesToStage: string[] = [];
   const {lockfilePath} = detectPackageManagerWithLockfile();
   if (lockfilePath) {
     filesToStage.push(lockfilePath);
@@ -316,6 +325,11 @@ async function preCommitHandler(
   // A fallen-back or failed branch-suffix measurement must not be silent
   if (branchSuffixWarning !== null && effectiveFormat !== 'silent') {
     console.warn(branchSuffixWarning);
+  }
+
+  // Nor must a base version that did not come from the index (D9)
+  if (preCommitBaseWarning !== null && effectiveFormat !== 'silent') {
+    console.warn(preCommitBaseWarning);
   }
 
   if (effectiveFormat !== 'silent') {

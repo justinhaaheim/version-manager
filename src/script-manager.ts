@@ -2,6 +2,9 @@ import {execSync} from 'child_process';
 import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
+import {readIndexEntry, writeIndexEntry} from './git-utils';
+import {replaceTopLevelStringValue} from './json-text-edit';
+
 interface PackageJson {
   [key: string]: unknown;
   scripts?: Record<string, string>;
@@ -246,31 +249,130 @@ export function updatePackageVersion(newVersion: string): boolean {
   return writePackageJson(packageJson);
 }
 
+/** The one file the pre-commit path reads and writes. */
+const PACKAGE_JSON = 'package.json';
+
 /**
- * Read the version the pre-commit calculation starts from.
+ * Where the pre-commit base version was measured.
  *
- * Isolated from the calculation on purpose: version-manager-70i.3 changes
- * where this value comes from (the git INDEX, via `git show :package.json`,
- * rather than the working tree) and should only have to replace this body.
- *
- * @returns The current version string, or null if package.json has none
+ * 'working-tree' is D9's documented fallback and only happens when
+ * package.json is absent from the index entirely (a repo where it has never
+ * been staged). It is reported, never silent.
  */
-export function readPreCommitBaseVersion(): string | null {
-  return getPackageVersion();
+export interface PreCommitBaseVersion {
+  source: 'index' | 'working-tree';
+  version: string;
+}
+
+/**
+ * Read the version the pre-commit calculation starts from — from the INDEX.
+ *
+ * THE INDEX IS WHAT THE COMMIT IS MADE FROM (version-manager-70i.3, D9). When
+ * package.json is unstaged the index still holds HEAD's content, so one rule
+ * covers both the staged and the unstaged case with no branching, and an
+ * unstaged version edit in the working tree cannot steer the calculation.
+ *
+ * @returns The version and where it came from, or null if package.json has no
+ *   top-level string `version`. Null is "no version there"; a read that FAILS
+ *   throws (critical rule 6).
+ * @throws If git fails, or the staged package.json is not valid JSON
+ */
+export function readPreCommitBaseVersion(): PreCommitBaseVersion | null {
+  const entry = readIndexEntry(PACKAGE_JSON);
+
+  if (entry === null) {
+    // D9: nothing staged to read, so the working tree is all there is.
+    const version = getPackageVersion();
+    return version === null ? null : {source: 'working-tree', version};
+  }
+
+  let staged: unknown;
+  try {
+    staged = JSON.parse(entry.content);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `The package.json staged in the git index is not valid JSON: ${message}`,
+    );
+  }
+
+  const version = (staged as {version?: unknown}).version;
+
+  if (typeof version !== 'string') {
+    return null;
+  }
+
+  return {source: 'index', version};
 }
 
 /**
  * Write the version computed for the commit that is about to happen.
  *
- * The counterpart to readPreCommitBaseVersion(): version-manager-70i.3
- * replaces this body with a surgical index write (hash-object +
- * update-index) plus a version-field-only rewrite of the working-tree file.
+ * Two writes, one string (version-manager-70i.3, D9):
+ *
+ * 1. THE INDEX gets the staged content with only the version value replaced,
+ *    written surgically with hash-object + update-index. Nothing else about
+ *    the index moves, so unstaged edits sitting in the working-tree
+ *    package.json are NOT swept into the commit. The caller must not `git
+ *    add` package.json afterwards — that would undo exactly this.
+ * 2. THE WORKING-TREE FILE gets a string-level replacement of the same value.
+ *    Deliberately NOT a parse-and-re-stringify: reformatting the file is how
+ *    a half-finished edit gets destroyed, which is the harm this bead exists
+ *    to prevent.
+ *
+ * Both replacements are computed before either is written, so the common
+ * failure — no top-level `version` to replace — cannot leave the index and
+ * the working tree disagreeing.
  *
  * @param newVersion - The version string to record
  * @returns True if successful, false otherwise
  */
 export function writePreCommitVersion(newVersion: string): boolean {
-  return updatePackageVersion(newVersion);
+  const entry = readIndexEntry(PACKAGE_JSON);
+  const workingTreePath = join(process.cwd(), PACKAGE_JSON);
+
+  let newIndexContent: string | null = null;
+  if (entry !== null) {
+    newIndexContent = replaceTopLevelStringValue(
+      entry.content,
+      'version',
+      newVersion,
+    );
+
+    if (newIndexContent === null) {
+      console.error(
+        'Failed to update package.json version: the package.json staged in the git index has no top-level "version" string.',
+      );
+      return false;
+    }
+  }
+
+  if (!existsSync(workingTreePath)) {
+    console.error(
+      'Failed to update package.json version: package.json is in the git index but missing from the working tree.',
+    );
+    return false;
+  }
+
+  const newWorkingTreeContent = replaceTopLevelStringValue(
+    readFileSync(workingTreePath, 'utf-8'),
+    'version',
+    newVersion,
+  );
+
+  if (newWorkingTreeContent === null) {
+    console.error(
+      'Failed to update package.json version: the working-tree package.json has no top-level "version" string.',
+    );
+    return false;
+  }
+
+  if (entry !== null && newIndexContent !== null) {
+    writeIndexEntry({...entry, content: newIndexContent});
+  }
+
+  writeFileSync(workingTreePath, newWorkingTreeContent);
+  return true;
 }
 
 /**

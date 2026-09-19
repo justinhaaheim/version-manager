@@ -4,9 +4,55 @@ import * as path from 'path';
 
 import {
   activateHooks,
+  setupBasicRepo,
   setupPackageJsonModeRepo,
 } from '../helpers/repo-fixtures';
 import {TestRepo} from '../helpers/test-repo';
+
+/**
+ * A package.json nothing in this codebase would ever produce: four-space
+ * indent, a blank line inside the object, and `name` last. Used to prove the
+ * hook rewrites the version VALUE and nothing else (70i.3 AC3).
+ */
+const ODD_PACKAGE_JSON = [
+  '{',
+  '    "version": "0.1.0",',
+  '',
+  '    "devDependencies": {',
+  '        "husky": "^9.1.7"',
+  '    },',
+  '    "name": "test-package"',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * The shape of the fixture package.json these tests read back. Every field
+ * but `version` is optional because the tests deliberately add and remove
+ * them; TestRepo.readPackageJson() guarantees only `version`.
+ */
+type FixturePackageJson = {
+  description?: string;
+  devDependencies?: Record<string, string>;
+  name?: string;
+  version: string;
+} & Record<string, unknown>;
+
+/**
+ * The two-character `git status --porcelain` code for one path, e.g. ' M' for
+ * "modified, not staged" or '??' for untracked.
+ *
+ * @returns The code, or null if git does not report that path at all. Null is
+ *   "git said nothing about it", which is not the same as any status code.
+ */
+function statusOf(repo: TestRepo, filePath: string): string | null {
+  const line = repo
+    .runGit('status --porcelain')
+    .stdout.split('\n')
+    .find((candidate) => candidate.endsWith(` ${filePath}`));
+
+  return line === undefined ? null : line.slice(0, 2);
+}
 
 /**
  * Integration tests for `versionMode: 'package-json'`.
@@ -352,11 +398,13 @@ describe('package-json version mode', () => {
     });
   });
 
-  describe('working tree handling', () => {
-    test('unstaged package.json edits are swept into the commit', () => {
-      // DOCUMENTS A DATA-INTEGRITY BUG: the hook reads and rewrites the
-      // WORKING TREE package.json and then `git add`s the whole file, so an
-      // unrelated half-finished edit is committed without the user asking.
+  describe('the index is the source of truth in pre-commit (70i.3, D9)', () => {
+    test('AC1: an unstaged package.json edit is NOT swept into the commit, but the version bump is', () => {
+      // THE HEADLINE. This test asserted the opposite until 70i.3: the hook
+      // read and rewrote the WORKING TREE package.json and then `git add`ed
+      // the whole file, so an unrelated half-finished edit landed in a commit
+      // the author never staged it for. Content reaching history unasked is a
+      // data-integrity bug, not a `git add -p` annoyance.
       setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
       activateHooks(repo);
 
@@ -364,21 +412,184 @@ describe('package-json version mode', () => {
       repo.writeFile('a.txt', 'a\n');
       repo.runGit('add a.txt');
 
-      // Leave an UNSTAGED edit in package.json.
-      const pkg = repo.readPackageJson();
-      pkg.description = 'half-finished edit that should NOT be committed';
-      repo.writeFile('package.json', JSON.stringify(pkg, null, 2) + '\n');
+      // Leave an UNSTAGED devDependency edit in package.json — the
+      // half-added dependency case, written the way a human would leave it.
+      const edited = repo.readPackageJson() as FixturePackageJson;
+      edited.devDependencies = {
+        ...edited.devDependencies,
+        'left-pad': '^1.3.0',
+      };
+      repo.writeFile('package.json', JSON.stringify(edited, null, 2) + '\n');
 
-      repo.runGit('commit -m "commit only a.txt"');
+      expect(repo.runGit('commit -m "commit only a.txt"').exitCode).toBe(0);
 
       const committed = JSON.parse(
         repo.runGit('show HEAD:package.json').stdout,
-      ) as {description?: string};
+      ) as {devDependencies?: Record<string, string>; version: string};
 
-      expect(committed.description).toBe(
-        'half-finished edit that should NOT be committed',
+      // The version bump DID land in the commit: that is the mode's purpose.
+      expect(committed.version).toBe('0.1.1');
+      // The unstaged edit did NOT.
+      expect(committed.devDependencies?.['left-pad']).toBeUndefined();
+
+      // The working tree still holds both, and package.json is still dirty:
+      // the author's half-finished edit is exactly where they left it.
+      const workingTree = repo.readPackageJson() as FixturePackageJson;
+      expect(workingTree.version).toBe('0.1.1');
+      expect(workingTree.devDependencies?.['left-pad']).toBe('^1.3.0');
+      expect(statusOf(repo, 'package.json')).toBe(' M');
+    }, 30000);
+
+    test('AC2: a STAGED package.json edit is committed, together with the version bump', () => {
+      // The other half of AC1: staging is honoured exactly as the author
+      // asked. Only what they did NOT stage is left behind.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+      activateHooks(repo);
+
+      const edited = repo.readPackageJson() as FixturePackageJson;
+      edited.description = 'deliberately staged';
+      edited.devDependencies = {
+        ...edited.devDependencies,
+        'left-pad': '^1.3.0',
+      };
+      repo.writeFile('package.json', JSON.stringify(edited, null, 2) + '\n');
+      repo.runGit('add package.json');
+
+      expect(repo.runGit('commit -m "stage package.json"').exitCode).toBe(0);
+
+      const committed = JSON.parse(
+        repo.runGit('show HEAD:package.json').stdout,
+      ) as {
+        description?: string;
+        devDependencies?: Record<string, string>;
+        name?: string;
+        version: string;
+      };
+
+      expect(committed.version).toBe('0.1.1');
+      expect(committed.description).toBe('deliberately staged');
+      expect(committed.devDependencies?.['left-pad']).toBe('^1.3.0');
+      // Unchanged in every other respect.
+      expect(committed.name).toBe('test-package');
+      expect(committed.devDependencies?.husky).toBe('^9.1.7');
+
+      // Nothing left over: the staged edit and the bump both went in.
+      expect(repo.runGit('status --porcelain').stdout.trim()).toBe('');
+    }, 30000);
+
+    test('AC3: formatting and key order survive byte-for-byte apart from the version', () => {
+      // The reason the working-tree write is a string-level replacement and
+      // not a parse-and-re-stringify: reformatting a file someone is midway
+      // through editing destroys the very work AC1 protects.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+      activateHooks(repo);
+
+      // Written AFTER activateHooks on purpose: `install` rewrites
+      // package.json through JSON.stringify, which would flatten this back to
+      // two-space indent before the test even starts.
+      repo.writeFile('package.json', ODD_PACKAGE_JSON);
+      repo.runGit('add package.json');
+      expect(
+        repo.runGit('commit --no-verify -m "hand-formatted package.json"')
+          .exitCode,
+      ).toBe(0);
+
+      repo.writeFile('a.txt', 'a\n');
+      repo.runGit('add a.txt');
+      expect(repo.runGit('commit -m "hooked"').exitCode).toBe(0);
+
+      // 0.1.0 was last changed 1 commit ago, so this commit is +2.
+      const expected = ODD_PACKAGE_JSON.replace('"0.1.0"', '"0.1.2"');
+
+      // Working tree: every byte but the version value is where it was.
+      expect(repo.readFile('package.json')).toBe(expected);
+      // And so is the copy that went into the commit.
+      expect(repo.runGit('show HEAD:package.json').stdout).toBe(expected);
+    }, 30000);
+
+    test('AC4: the version written to the index and to the working tree is the same string', () => {
+      // Proven with the two files genuinely differing, so "same string" is
+      // not true merely because the two copies are identical.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+      activateHooks(repo);
+
+      repo.writeFile('a.txt', 'a\n');
+      repo.runGit('add a.txt');
+
+      const edited = repo.readPackageJson() as Record<string, unknown>;
+      edited.description = 'unstaged, so the two copies differ';
+      repo.writeFile('package.json', JSON.stringify(edited, null, 2) + '\n');
+
+      expect(repo.runGit('commit -m "first"').exitCode).toBe(0);
+
+      const committedVersion = (
+        JSON.parse(repo.runGit('show HEAD:package.json').stdout) as {
+          version: string;
+        }
+      ).version;
+
+      expect(repo.readPackageJson().version).toBe(committedVersion);
+      expect(committedVersion).toBe('0.1.1');
+      // The copies really were different, or this test proves nothing.
+      expect(
+        (repo.readPackageJson() as {description?: string}).description,
+      ).toBe('unstaged, so the two copies differ');
+    }, 30000);
+
+    test('an unstaged VERSION edit does not steer the calculation', () => {
+      // The direct consequence of reading the index: the base version is what
+      // the commit is being made FROM, not whatever the author happens to
+      // have typed into their working copy and not staged.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+      activateHooks(repo);
+
+      const edited = repo.readPackageJson() as Record<string, unknown>;
+      edited.version = '9.9.9';
+      repo.writeFile('package.json', JSON.stringify(edited, null, 2) + '\n');
+
+      repo.writeFile('a.txt', 'a\n');
+      repo.runGit('add a.txt');
+      expect(repo.runGit('commit -m "first"').exitCode).toBe(0);
+
+      // Computed from the staged 0.1.0, not from the unstaged 9.9.9.
+      expect(repo.readPackageJson().version).toBe('0.1.1');
+    }, 30000);
+
+    test('package.json absent from the index falls back to the working tree and says so', () => {
+      // D9's documented fallback: a repo where package.json has never been
+      // staged. The fallback is reported, never silent — an unmeasured index
+      // must not look like a measured one.
+      setupBasicRepo(repo);
+
+      repo.writeFile(
+        'package.json',
+        JSON.stringify({name: 'untracked', version: '0.1.0'}, null, 2) + '\n',
       );
-    });
+      repo.writeFile(
+        'version-manager.json',
+        JSON.stringify(
+          {
+            versionCalculationMode: 'add-to-patch',
+            versionMode: 'package-json',
+            versions: {},
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+
+      // 2>&1 because TestRepo.runCli cannot capture stderr on a successful
+      // run (version-manager-70i.13 F2).
+      const result = repo.runCli('--pre-commit 2>&1');
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('not in the git index');
+      expect(repo.readPackageJson().version).toBe('0.1.1');
+      // Still untracked: the fallback writes the working tree only. Adding a
+      // whole unstaged file to the index is the bigger version of the bug
+      // this bead fixes.
+      expect(statusOf(repo, 'package.json')).toBe('??');
+    }, 30000);
   });
 
   describe('package manager side effects', () => {
