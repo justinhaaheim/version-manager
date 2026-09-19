@@ -247,6 +247,43 @@ describe('package-json version mode', () => {
       expect(repo.readPackageJson().version).toBe('0.1.1');
     });
 
+    test('with branchSuffix ON, equal-length branches no longer collide (70i.10)', () => {
+      // THE KNOB-ON TWIN of the test above, which is kept as the control.
+      // The suffix makes the two sides structurally different, so the same
+      // scenario becomes a VISIBLE CONFLICT instead of a clean auto-merge
+      // that silently undercounts. The suffix does not reduce conflicts —
+      // it converts a wrong answer into a stopped merge.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch', {
+        enabled: true,
+      });
+      activateHooks(repo);
+
+      const base = repo.runGit('rev-parse --abbrev-ref HEAD').stdout.trim();
+      expect(['main', 'master']).toContain(base);
+
+      repo.runGit('checkout -b feature');
+      repo.writeFile('f.txt', 'f\n');
+      repo.runGit('add -A');
+      repo.runGit('commit -m "feature work"');
+      const featureVersion = repo.readPackageJson().version;
+
+      repo.runGit(`checkout ${base}`);
+      repo.writeFile('m.txt', 'm\n');
+      repo.runGit('add -A');
+      repo.runGit('commit -m "main work"');
+      const baseVersion = repo.readPackageJson().version;
+
+      // The control asserts both sides are '0.1.1'. Here they differ.
+      expect(featureVersion).toBe('0.1.1-feature.1');
+      expect(baseVersion).toBe('0.1.1');
+      expect(featureVersion).not.toBe(baseVersion);
+
+      const merge = repo.runGit('merge --no-ff feature -m "merge feature"');
+
+      expect(merge.exitCode).not.toBe(0);
+      expect(merge.stdout + merge.stderr).toContain('package.json');
+    }, 30000);
+
     test('branches of UNEQUAL length conflict on package.json', () => {
       // DOCUMENTS THE CENTRAL TRADE-OFF: as soon as the two sides compute
       // different versions, every merge stops on a package.json conflict.
@@ -422,5 +459,110 @@ describe('package-json version mode', () => {
       ) as {version: string};
       expect(committed.version).toBe('0.1.1');
     });
+  });
+
+  describe('branch suffix in package-json mode (70i.10)', () => {
+    test('add-to-patch: successive commits advance both the version and n, with no compounding (AC 7)', () => {
+      // THE FEEDBACK LOOP. In this mode the decorated version is committed
+      // into package.json and read back as the next computation's input.
+      // Without the D3 strip-then-reapply the suffix would either compound
+      // (0.1.0-feat-x.1-feat-x.2) or, far worse, freeze the version
+      // forever — calculatePreCommitVersion() returns its input UNCHANGED
+      // when the split is not exactly three parts, so nothing errors.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch', {
+        enabled: true,
+      });
+      activateHooks(repo);
+
+      repo.runGit('checkout -b feat-x');
+
+      const observed: string[] = [];
+      for (let i = 1; i <= 3; i++) {
+        repo.writeFile(`file${i}.txt`, `content ${i}\n`);
+        repo.runGit('add -A');
+        expect(repo.runGit(`commit -m "commit ${i}"`).exitCode).toBe(0);
+        observed.push(repo.readPackageJson().version);
+      }
+
+      expect(observed).toEqual([
+        '0.1.1-feat-x.1',
+        '0.1.2-feat-x.2',
+        '0.1.3-feat-x.3',
+      ]);
+    }, 30000);
+
+    test('append-commits: the prerelease sits before the +N metadata and neither compounds (AC 7)', () => {
+      setupPackageJsonModeRepo(repo, '0.1.0', 'append-commits', {
+        enabled: true,
+      });
+      activateHooks(repo);
+
+      repo.runGit('checkout -b feat-x');
+
+      const observed: string[] = [];
+      for (let i = 1; i <= 3; i++) {
+        repo.writeFile(`file${i}.txt`, `content ${i}\n`);
+        repo.runGit('add -A');
+        expect(repo.runGit(`commit -m "commit ${i}"`).exitCode).toBe(0);
+        observed.push(repo.readPackageJson().version);
+      }
+
+      expect(observed).toEqual([
+        '0.1.0-feat-x.1+1',
+        '0.1.0-feat-x.2+2',
+        '0.1.0-feat-x.3+3',
+      ]);
+    }, 30000);
+
+    test('the decorated version is COMMITTED into package.json, not just written (AC 8)', () => {
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch', {
+        enabled: true,
+      });
+      activateHooks(repo);
+
+      repo.runGit('checkout -b feat-x');
+      repo.writeFile('a.txt', 'a\n');
+      repo.runGit('add -A');
+      repo.runGit('commit -m "first"');
+
+      const committed = JSON.parse(
+        repo.runGit('show HEAD:package.json').stdout,
+      ) as {version: string};
+      expect(committed.version).toBe('0.1.1-feat-x.1');
+
+      // Working tree still clean: nothing left for the user to commit.
+      expect(repo.runGit('status --porcelain').stdout.trim()).toBe('');
+    }, 30000);
+
+    test('committing back on a main branch strips the branch suffix (D3, D6)', () => {
+      // The merge case: a decorated version that landed on main must not
+      // freeze there. version-manager owns the prerelease while the knob is
+      // on, so the next main-branch commit strips it and carries on.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch', {
+        enabled: true,
+      });
+      activateHooks(repo);
+
+      const base = repo.runGit('rev-parse --abbrev-ref HEAD').stdout.trim();
+      expect(['main', 'master']).toContain(base);
+
+      repo.runGit('checkout -b feat-x');
+      repo.writeFile('a.txt', 'a\n');
+      repo.runGit('add -A');
+      repo.runGit('commit -m "feature work"');
+      expect(repo.readPackageJson().version).toBe('0.1.1-feat-x.1');
+
+      // Land the branch on main with a fast-forward, so main's
+      // package.json now carries the decorated version.
+      repo.runGit(`checkout ${base}`);
+      expect(repo.runGit('merge --ff-only feat-x').exitCode).toBe(0);
+      expect(repo.readPackageJson().version).toBe('0.1.1-feat-x.1');
+
+      repo.writeFile('b.txt', 'b\n');
+      repo.runGit('add -A');
+      expect(repo.runGit('commit -m "main work"').exitCode).toBe(0);
+
+      expect(repo.readPackageJson().version).toBe('0.1.2');
+    }, 30000);
   });
 });

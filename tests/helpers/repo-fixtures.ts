@@ -8,6 +8,56 @@ import * as path from 'path';
  */
 
 /**
+ * The branchSuffix block to write into a fixture's version-manager.json.
+ *
+ * `mainBranches` is deliberately optional so tests can write a PARTIAL object
+ * and prove that the schema still supplies the default list.
+ */
+export interface BranchSuffixFixtureConfig {
+  enabled: boolean;
+  mainBranches?: string[];
+}
+
+/**
+ * Set up a repo in the default `versionMode: 'dynamic-file'`, with package.json
+ * and version-manager.json committed and no git hooks installed. The CLI is
+ * invoked explicitly by the test, which is how dynamic-file mode is exercised
+ * without the hook machinery.
+ */
+export function setupDynamicFileModeRepo(
+  repo: TestRepo,
+  packageVersion = '0.1.0',
+  versionCalculationMode: 'add-to-patch' | 'append-commits' = 'add-to-patch',
+  branchSuffix?: BranchSuffixFixtureConfig,
+): void {
+  repo.initGit();
+  repo.writeFile('README.md', '# Test Repo\n');
+  repo.makeCommit('Initial commit');
+
+  repo.writeFile(
+    'package.json',
+    JSON.stringify({name: 'test-package', version: packageVersion}, null, 2) +
+      '\n',
+  );
+
+  repo.writeFile(
+    'version-manager.json',
+    JSON.stringify(
+      {
+        ...(branchSuffix === undefined ? {} : {branchSuffix}),
+        versionCalculationMode,
+        versionMode: 'dynamic-file',
+        versions: {},
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  repo.writeFile('.gitignore', '*.local.json\n*.local.d.ts\n');
+  repo.makeCommit('Add version config files');
+}
+
+/**
  * Set up a fresh repo with no version-manager.json
  */
 export function setupBasicRepo(repo: TestRepo): void {
@@ -132,6 +182,7 @@ export function setupPackageJsonModeRepo(
   repo: TestRepo,
   packageVersion = '0.1.0',
   versionCalculationMode: 'add-to-patch' | 'append-commits' = 'add-to-patch',
+  branchSuffix?: BranchSuffixFixtureConfig,
 ): void {
   repo.initGit();
   repo.writeFile('README.md', '# Test Repo\n');
@@ -154,6 +205,7 @@ export function setupPackageJsonModeRepo(
     'version-manager.json',
     JSON.stringify(
       {
+        ...(branchSuffix === undefined ? {} : {branchSuffix}),
         versionCalculationMode,
         versionMode: 'package-json',
         versions: {},
