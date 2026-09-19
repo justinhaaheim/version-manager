@@ -22,11 +22,12 @@ npx @justinhaaheim/version-manager install
 
 This will:
 
-- Create `version-manager.json` (committed - your version configuration)
 - Install git hooks that auto-regenerate versions on git operations
 - Add npm scripts to your `package.json` for manual regeneration
 - Generate `dynamic-version.local.json` (gitignored - computed versions)
 - Add `*.local.json` to your `.gitignore`
+
+It does **not** create `version-manager.json` (measured): that file is optional, and you write it yourself when you want anything other than the defaults — see [Version Files](#version-files).
 
 ## Quick Start
 
@@ -65,14 +66,19 @@ This will:
 
 ```json
 {
-  "runtimeVersion": "0.1.0",
-  "versionCalculationMode": "add-to-patch"
+  "versionCalculationMode": "add-to-patch",
+  "versions": {
+    "runtime": "0.1.0"
+  }
 }
 ```
 
-- Configuration for runtime version and calculation mode
-- Base version is now in standard `package.json` version field
+- Configuration for the calculation mode, the version mode, and any extra versions you track
+- Base version is now in the standard `package.json` version field
 - The tool tracks commits since the last time package.json version changed
+- Every field is optional; the whole file is optional too, and its absence means `append-commits` in `dynamic-file` mode
+- The old top-level `"runtimeVersion": "0.1.0"` is still accepted: it is migrated to `versions.runtime` and the file is rewritten in place, with a message saying so
+- The optional knobs — `versionMode`, `branchSuffix`, `mergeDriver` — each have their own section below
 
 **`dynamic-version.local.json`** (gitignored, auto-generated):
 
@@ -340,6 +346,70 @@ Appends the commit count as build metadata.
 
 Best for pre-release/dev builds where you want to see commit count explicitly.
 
+## Version Modes: where the computed version ends up
+
+`versionMode` in `version-manager.json` picks between two ways of delivering the computed version.
+
+|                         | `dynamic-file` (default)                                                      | `package-json`                                                     |
+| ----------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Where the version lands | `dynamic-version.local.json`, gitignored                                      | the `version` field of `package.json`, committed                   |
+| When it is computed     | after the fact — `post-commit`, `post-checkout`, `post-merge`, `post-rewrite` | before the fact — `pre-commit`, so the number is inside the commit |
+| What a consumer needs   | the generated file, so `.git` and a run of this tool wherever you build       | nothing but `package.json`                                         |
+| History it tolerates    | any                                                                           | linear (see the limitations below)                                 |
+
+### Why `package-json` mode exists
+
+The generated file is gitignored by design, so it has to be regenerated wherever the code is built. Two places where that fails:
+
+- **CI**: the runner has to run this tool, which needs `.git` and the commit history to be present.
+- **Expo EAS builds**: these have historically packed the repository _without_ `.git`, so generating the file is impossible.
+
+In `package-json` mode a **pre-commit** hook computes the next version and writes it into `package.json` as part of the commit. The committed `package.json` then carries the real version, and reading it needs neither `.git`, nor a generated file, nor this tool.
+
+The cost is that the version changes on **every** commit, so `package.json` is rewritten on every commit and two branches that have both committed disagree about that line. Most of the limitations below follow from that.
+
+### Turning it on
+
+There is no `--mode` flag and `install` does not ask, so write `version-manager.json` yourself first:
+
+```json
+{
+  "versionCalculationMode": "add-to-patch",
+  "versionMode": "package-json",
+  "versions": {}
+}
+```
+
+Then install:
+
+```bash
+npx @justinhaaheim/version-manager install
+```
+
+Measured: `install --help` lists no mode option, and `install` in a repository with no `version-manager.json` neither creates one nor asks for one — it installs `dynamic-file` hooks. The config file has to exist and say `package-json` **before** you install.
+
+Install then writes a `pre-commit` hook and **no `post-*` hooks at all**, adds no `prebuild` / `predev` / `prestart` lifecycle scripts, and leaves `.gitignore` alone: there is no generated file in this mode to regenerate or to ignore. Nothing writes `dynamic-version.local.json` unless you pass `--output` explicitly, which is read as unambiguous intent and honoured.
+
+**Switching an existing project over leaves the old mode's machinery behind.** Measured: the four `post-*` hooks stay on disk and keep running, an existing `dynamic-version.local.json` stays where it is and is never updated again, and the lifecycle scripts stay in `package.json`. A stale generated file is worse than a missing one — absent fails loudly at the import, stale reads as current — so clean these up by hand. Read each hook before deleting it: `install` appends to hooks that already exist, so a hook file may contain lines that are not ours.
+
+### What the pre-commit hook does, exactly
+
+- It reads the current version from the **index** (`git show :package.json`), which equals `HEAD`'s content when `package.json` is unstaged, and writes the new version into the index surgically. An unstaged edit elsewhere in `package.json` is **not** swept into the commit; a staged one is committed as usual. Formatting and key order survive byte for byte apart from the version itself.
+- It **fails loudly**. A failed index write, a failed working-tree write or a replacement that did not verify aborts the commit and names the failed command, rather than recording a commit whose version is wrong. `--no-fail` cannot turn a pre-commit failure into a successful commit.
+- It invokes **no package manager**, and touches no lockfile: a lockfile records the root version in `package-lock.json` but not in `bun.lock`, and neither `npm ci` nor `bun install --frozen-lockfile` objects to a version-only bump.
+- `git commit --no-verify` is self-healing rather than permanently wrong: a version set _i_ commits ago simply yields +(i+1) at the next hooked commit.
+
+### Known limitations — `package-json` mode is for linear history
+
+All of these are measured. The first four are pinned by tests in `tests/integration/package-json-mode.test.ts`; the last two were measured by probe and are noted as such.
+
+- **`git commit --amend` bumps a second time.** The hook re-runs and has no way to know the commit being amended already carried a bump.
+- **`git rebase` never re-runs the hook.** A rebased branch gains commits while the version stands still, so it undercounts its own history until the next ordinary commit.
+- **An automatic merge commit keeps a stale version.** git fires `pre-merge-commit` for a merge it resolves by itself, not `pre-commit`, so nothing recomputes. A merge you finish with your own `git commit` — after a conflict, or after `git merge --squash` — does run the hook and does bump.
+- **Two branches that add the same number of commits compute the same version.** git then merges that line cleanly and the result quietly undercounts the work in it: two commits of work, one commit of version. Branches of _unequal_ length always conflict on `package.json` instead. The [branch suffix](#branch-name-suffix-opt-in) turns the silent case into a visible conflict; the [merge driver](#the-packagejson-merge-driver-package-json-mode-only-opt-in) resolves the conflict by policy. Both are opt-in and off by default.
+- **`append-commits` and `npm publish` do not mix** (probe, not a test). npm strips build metadata: probed with `npm publish --dry-run`, a package at version `1.0.0+5` published as `1.0.0` and produced `publishprobe-1.0.0.tgz`, so every commit would try to publish the same version and the registry would reject the second. Use `add-to-patch` if you publish to npm.
+- **Installing this package from GitHub does not currently get you any of this** (probe, not a test). The committed `dist/` that a GitHub install runs was built on 2026-06-11 and predates `package-json` mode entirely — `grep` finds no `versionMode` anywhere in it, and `node dist/index.js merge-driver …` answers `Unknown arguments: merge-driver` and exits 1 without merging anything. Until `dist/` is rebuilt and committed, run this tool from a local checkout.
+
 ## Branch Name Suffix (opt-in)
 
 Off by default. When enabled, a build made on a branch that is **not** one of the configured main branches carries a semver **prerelease** naming the branch and counting that branch's own commits:
@@ -385,11 +455,25 @@ While `branchSuffix.enabled` is `true`, version-manager **owns** the prerelease 
 
 This is deliberate. In `package-json` mode the decorated version is committed into `package.json` and read back as the input to the next computation; without stripping, the suffix would compound, or the version would freeze in place with no error at all. If you hand-manage prerelease versions, leave this knob off.
 
-## The package.json merge driver (`package-json` mode only)
+## The package.json merge driver (`package-json` mode only, opt-in)
 
 In `package-json` mode the computed version is written into `package.json` on every commit, so two branches that have both committed have both edited the same line. **Every** merge between them conflicts on that line, even when nothing else disagrees.
 
-`version-manager install` registers a git merge driver that resolves it. Two things are written:
+`version-manager install` can register a git merge driver that resolves it. **It is off by default**, and both conditions are required — `versionMode` must be `package-json` _and_ the knob must be on:
+
+```json
+{
+  "versionCalculationMode": "add-to-patch",
+  "versionMode": "package-json",
+  "mergeDriver": {
+    "enabled": true
+  }
+}
+```
+
+It is off by default because registering the driver is what exposes a repository to the second limitation below: when the registered command cannot run, git reports a conflict but leaves `package.json` as yours with **no conflict markers in it**, which is stageable and loses the other side. Without a driver registered, git writes markers and that cannot happen. Turn it on knowing that trade; with the knob off, `install` says nothing about merge drivers at all.
+
+With the knob on, two things are written:
 
 ```gitattributes
 # .gitattributes — committed, travels with the repo
@@ -426,10 +510,12 @@ Nothing else about `package.json` is touched. The driver rewrites the version va
 
 - **Every clone must run `install` again.** The `.gitattributes` line is committed and travels; the `merge.version-manager.driver` entry cannot. A collaborator who has not run `install` simply gets today's behaviour — git falls back to its built-in merge and the version line conflicts. Nothing breaks.
 - **If the registered command cannot run, the conflict has no markers in it.** Measured: when the driver command itself fails — the likeliest cause being `npx` unable to resolve the package in a checkout with no `node_modules`, and note that `git worktree add` creates exactly that while sharing `.git/config` — git reports `CONFLICT ... package.json` and marks the path unmerged, but the file left in your tree is **ours verbatim, with no conflict markers**. Running `git add package.json` at that point silently discards the other side's `package.json` changes. If git says `package.json` conflicted and you find nothing to resolve in it, do not stage it: run `bun install` (or `npm install`) and redo the merge.
+- **A GitHub install cannot run the driver at all today.** The committed `dist/` predates this subcommand: `node dist/index.js merge-driver …` answers `Unknown arguments: merge-driver` and exits 1 without writing the merge result — which is precisely the failure in the bullet above. Until `dist/` is rebuilt and committed, do not turn this knob on in a repository that runs version-manager from a GitHub install.
+- **Nothing takes the registration back.** There is no unregister path: turning the knob off again, switching back to `dynamic-file` mode, or dropping version-manager entirely all leave the committed `.gitattributes` line and the `.git/config` section exactly where they are, and merges keep being resolved by policy. Undo it by hand — `git config --remove-section merge.version-manager` (the whole section, see the next bullet) and delete the `.gitattributes` line.
 - **Do not hand-write half the configuration.** With the attribute in place, a `merge.version-manager.name` entry and **no** `.driver` entry makes git abort the merge outright — `fatal: custom merge driver version-manager lacks command line.` — rather than fall back. `install` writes the driver first so it cannot leave you there; if you edit `.git/config` by hand, remove the whole `[merge "version-manager"]` section rather than just the driver line.
 - **Rebase keeps the upstream's version** (measured). During a rebase git's "ours" is the branch you are rebasing **onto**, so replaying `feature` onto `main` leaves `package.json` at main's version and drops the branch's bump; a commit whose _only_ change was the version bump is dropped entirely as already-upstream. The rest of the commit applies normally. Rebase never re-runs the pre-commit hook either, so the version stands still until the next commit.
 - **`git commit --amend` re-runs the hook and bumps again**, with or without this driver.
-- The driver is registered in `package-json` mode only. In `dynamic-file` mode `package.json`'s version changes only when you deliberately bump it, and silently picking a side of a deliberate bump is not something to install on your behalf.
+- The driver is registered in `package-json` mode only, and only when the knob above is on. In `dynamic-file` mode `package.json`'s version changes only when you deliberately bump it, and silently picking a side of a deliberate bump is not something to install on your behalf — no knob overrides that.
 
 ## TypeScript Support
 
