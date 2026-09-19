@@ -356,6 +356,49 @@ describe('package.json merge driver (70i.8)', () => {
     );
 
     test(
+      'a driver command that cannot RUN leaves a conflict with no markers (known trap)',
+      () => {
+        setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+        activateHooks(repo);
+
+        // `false` stands in for the real way this happens: the registered
+        // command is `npx @justinhaaheim/version-manager ...`, and a fresh
+        // worktree (which SHARES .git/config, so the driver is registered)
+        // with no node_modules cannot resolve it.
+        repo.runGit('config merge.version-manager.driver false');
+
+        const mainBranch = repo
+          .runGit('rev-parse --abbrev-ref HEAD')
+          .stdout.trim();
+
+        repo.runGit('checkout -b feature');
+        commitPackageJsonChange(repo, 'their dependency', (packageJson) => {
+          packageJson.dependencies = {'theirs-only': '1.0.0'};
+        });
+
+        repo.runGit(`checkout ${mainBranch}`);
+        repo.writeFile('m.txt', 'm\n');
+        repo.makeCommit('main work');
+
+        const merge = repo.runGit('merge --no-ff feature -m "merge feature"');
+
+        // git reports a conflict, as it should — but because the driver
+        // never wrote anything, the file left behind is OURS verbatim with
+        // NO conflict markers in it. An author who sees "conflict", opens
+        // the file, finds nothing to resolve and runs `git add package.json`
+        // silently drops their side. Documented in the README; hardening the
+        // registered command is version-manager-70i.22.
+        expect(merge.exitCode).toBe(1);
+        expect(unmergedPaths(repo)).toEqual(['package.json']);
+
+        const left = repo.readFile('package.json');
+        expect(left).not.toContain('<<<<<<<');
+        expect(left).not.toContain('theirs-only');
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
       'a HALF-registered driver aborts the merge — which is why install writes the driver first',
       () => {
         setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
