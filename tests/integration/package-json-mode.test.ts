@@ -593,18 +593,25 @@ describe('package-json version mode', () => {
   });
 
   describe('package manager side effects', () => {
-    test('a failing package manager is swallowed and the commit still succeeds', () => {
-      // DOCUMENTS A "failure is not empty" VIOLATION: updateLockfile() catches
-      // every error from `npm install` / `bun install` and only console.warn()s.
-      // A package manager that is broken, offline, or mid-conflict produces a
-      // commit that looks completely successful.
+    test('a hooked commit invokes no package manager (70i.5)', () => {
+      // THE INVERSE of the test this replaces. That test proved the hook DID
+      // shell out to a package manager on every commit — and that a package
+      // manager exiting 1 was swallowed, leaving a commit that looked
+      // completely successful. 70i.5 deleted the call rather than hardening
+      // it: measured, the lockfile drift it closed is one no supported
+      // workflow notices (`bun install --frozen-lockfile` and `npm ci` both
+      // exit 0 after a version-only bump).
       //
-      // The failure is induced rather than assumed: a stub `npm` that exits 1
-      // is placed first on PATH. The hook itself runs under `bun`, which is
-      // resolved by absolute path, so only the package manager is broken.
+      // The proof is the same instrument, read the other way round: a stub
+      // `npm` first on PATH that touches a marker file. The marker must NOT
+      // exist after the commit. The stub also exits 1, so a reintroduced call
+      // fails this test twice over — once on the marker, once on whatever the
+      // failure does to the commit.
       setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
 
-      // Force the npm code path by giving the repo a package-lock.json.
+      // package-lock.json is what used to select the npm branch. Keeping it
+      // means a reintroduced lockfile refresh would reach the stub rather
+      // than silently taking the bun branch instead.
       repo.writeFile(
         'package-lock.json',
         JSON.stringify(
@@ -631,12 +638,18 @@ describe('package-json version mode', () => {
         PATH: `${stubDir}:${process.env.PATH ?? ''}`,
       });
 
-      // Guard against the test passing for the wrong reason: the hook really
-      // did shell out to the (failing) package manager.
-      expect(fs.existsSync(marker)).toBe(true);
+      // The whole point: nothing shelled out to npm.
+      expect(fs.existsSync(marker)).toBe(false);
 
-      // npm failed, yet nothing surfaces it: the commit succeeds and the
-      // version is still bumped and staged.
+      // `bun` cannot be stubbed the same way — the fixture's hooks run the CLI
+      // as `bun <path>`, resolved through this same PATH, so a stub would
+      // break the hook itself rather than observe it. node_modules is the
+      // cheap second signal: a real `bun install` in this fixture (husky is in
+      // devDependencies) materialises it. Absence is weaker evidence than the
+      // marker, and is here as a second pair of eyes, not as the proof.
+      expect(repo.fileExists('node_modules')).toBe(false);
+
+      // Control: the commit itself still worked.
       expect(commit.exitCode).toBe(0);
       expect(repo.readPackageJson().version).toBe('0.1.1');
 
@@ -644,7 +657,7 @@ describe('package-json version mode', () => {
         repo.runGit('show HEAD:package.json').stdout,
       ) as {version: string};
       expect(committed.version).toBe('0.1.1');
-    });
+    }, 30000);
   });
 
   describe("Justin's question: is dynamic-version.local.json still produced?", () => {

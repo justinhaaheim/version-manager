@@ -214,9 +214,13 @@ export function setupPackageJsonModeRepo(
       2,
     ) + '\n',
   );
-  // node_modules/ is ignored because the pre-commit hook shells out to a real
-  // `npm install` / `bun install` on every commit (see updateLockfile), which
-  // materialises node_modules even in a dependency-free fixture.
+  // node_modules/ is ignored as insurance. The pre-commit hook no longer
+  // shells out to `npm install` / `bun install` (70i.5 deleted that), so
+  // nothing here should materialise it any more — but a fixture that commits
+  // `git add -A` has no defence if something ever does, and the resulting
+  // failures are baffling. The package-manager test in
+  // tests/integration/package-json-mode.test.ts asserts the directory's
+  // absence, so this entry hides nothing that test is watching for.
   repo.writeFile('.gitignore', '*.local.json\n*.local.d.ts\nnode_modules/\n');
   repo.makeCommit('Add version config files');
 }

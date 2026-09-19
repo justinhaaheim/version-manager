@@ -1,4 +1,3 @@
-import {execSync} from 'child_process';
 import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
@@ -375,71 +374,20 @@ export function writePreCommitVersion(newVersion: string): boolean {
   return true;
 }
 
-/**
- * Detect which package manager to use based on lock files.
- * Returns the lockfile path alongside the manager name.
- */
-export function detectPackageManagerWithLockfile(): {
-  lockfilePath: string | null;
-  manager: 'bun' | 'npm';
-} {
-  const bunLockPath = join(process.cwd(), 'bun.lock');
-  const npmLockPath = join(process.cwd(), 'package-lock.json');
-
-  if (existsSync(bunLockPath)) {
-    return {lockfilePath: bunLockPath, manager: 'bun'};
-  }
-
-  if (existsSync(npmLockPath)) {
-    return {lockfilePath: npmLockPath, manager: 'npm'};
-  }
-
-  return {lockfilePath: null, manager: 'npm'};
-}
-
-/**
- * Update the lockfile after a package.json version change.
- * Runs `npm install` or `bun install` depending on detected package manager.
- * @param silent - Suppress console output
- */
-export function updateLockfile(silent = false): void {
-  const {manager} = detectPackageManagerWithLockfile();
-
-  const command = manager === 'bun' ? 'bun install' : 'npm install';
-
-  try {
-    execSync(command, {
-      cwd: process.cwd(),
-      stdio: silent ? 'pipe' : 'inherit',
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!silent) {
-      console.warn(`⚠️  Failed to update lockfile: ${message}`);
-    }
-  }
-}
-
-/**
- * Stage specific files using git add.
- * @param filePaths - Absolute or relative file paths to stage
- * @param silent - Suppress console output
- */
-export function stageFiles(filePaths: string[], silent = false): void {
-  if (filePaths.length === 0) {
-    return;
-  }
-
-  try {
-    const quoted = filePaths.map((f) => `"${f}"`).join(' ');
-    execSync(`git add ${quoted}`, {
-      cwd: process.cwd(),
-      stdio: silent ? 'pipe' : 'inherit',
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!silent) {
-      console.warn(`⚠️  Failed to stage files: ${message}`);
-    }
-  }
-}
+// THREE FUNCTIONS WERE REMOVED HERE by version-manager-70i.5: the lockfile
+// refresher, the lockfile-aware package-manager detector it used, and the
+// `git add` wrapper. Do not reintroduce them without reading that bead.
+//
+// The refresher ran `npm install` / `bun install` on every hooked commit to
+// close a version drift that, measured, no supported workflow notices:
+// bun.lock does not record the root package's version at all and `bun install
+// --frozen-lockfile` exits 0 after a version-only bump; package-lock.json does
+// record it and `npm ci` also exits 0. `npm version X --no-git-tag-version
+// --offline` closes the drift instantly and offline if it is ever wanted.
+//
+// The other two had no callers left once it went: the only thing the
+// pre-commit path staged was the lockfile that had just been rewritten, and
+// package.json goes into the index directly via writePreCommitVersion(), never
+// through `git add` (70i.3, D9). Husky installation still detects a package
+// manager — through the separate detectPackageManager() in
+// git-hooks-manager.ts, which is untouched.

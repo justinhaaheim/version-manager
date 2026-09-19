@@ -23,13 +23,10 @@ import {
 } from './output-formatter';
 import {
   addScriptsToPackageJson,
-  detectPackageManagerWithLockfile,
   getConflictingScripts,
   hasExistingDynamicVersionScripts,
   listDefaultScripts,
   readPackageJson,
-  stageFiles,
-  updateLockfile,
   writePreCommitVersion,
 } from './script-manager';
 import {
@@ -277,8 +274,6 @@ async function preCommitHandler(
   format: OutputFormat | null,
   generateTypes: boolean,
 ): Promise<void> {
-  const silent = format === 'silent';
-
   // Generate version data with pre-commit calculation (+1 for the about-to-happen commit)
   const {
     versionData,
@@ -304,20 +299,20 @@ async function preCommitHandler(
     throw new Error('Failed to update package.json version');
   }
 
-  // Update lockfile
-  updateLockfile(silent);
-
-  // Stage the lockfile only. package.json is DELIBERATELY not staged here:
-  // writePreCommitVersion() has already put the new version into the index by
-  // hand, and `git add package.json` would replace that with the whole
+  // NOTHING IS STAGED HERE, and no package manager runs (70i.5, 70i.3).
+  //
+  // package.json is already in the index: writePreCommitVersion() put it there
+  // by hand, and `git add package.json` would replace that with the whole
   // working-tree file — sweeping any unstaged edit into a commit the author
-  // never staged it for. That is the bug version-manager-70i.3 fixes.
-  const filesToStage: string[] = [];
-  const {lockfilePath} = detectPackageManagerWithLockfile();
-  if (lockfilePath) {
-    filesToStage.push(lockfilePath);
-  }
-  stageFiles(filesToStage, silent);
+  // never staged it for.
+  //
+  // The lockfile used to be refreshed by `npm install` / `bun install` and
+  // then staged. Measured (70i.5): bun.lock does not record the root
+  // package's version at all and `bun install --frozen-lockfile` exits 0 after
+  // a version-only bump; package-lock.json does record it and `npm ci` also
+  // exits 0. So the subprocess bought nothing and cost a package-manager run
+  // on every commit — and staging a lockfile the author had edited but not
+  // staged was the same sweep-it-in bug as above.
 
   // Display output
   const effectiveFormat = format ?? configuredFormat ?? 'compact';
