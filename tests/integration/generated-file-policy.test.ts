@@ -184,6 +184,21 @@ describe('generated file policy (70i.2)', () => {
       expect(repo.readFile('.gitignore')).toBe('node_modules/\n');
       expect(result.stdout).not.toContain('.gitignore');
     }, 30000);
+
+    test('F4: bump does not announce a generated file this mode never writes', () => {
+      // version-manager-70i.13 F4: bump printed '📝 Regenerating
+      // dynamic-version.local.json...' unconditionally, then called a function
+      // that writes nothing in this mode. The tool named a file it does not
+      // produce.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+
+      const result = repo.runCli('bump --patch --non-interactive');
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).not.toContain('Regenerating');
+      expect(result.stdout).toContain('this mode writes no version file');
+      expect(findGeneratedFiles(repo)).toEqual([]);
+    }, 30000);
   });
 
   describe('dynamic-file mode (regression control)', () => {
@@ -233,6 +248,19 @@ describe('generated file policy (70i.2)', () => {
       const gitignore = repo.readFile('.gitignore');
       expect(gitignore).toContain('dynamic-version.local.json');
       expect(gitignore).toContain('dynamic-version.local.d.ts');
+    }, 30000);
+
+    test('F4 control: bump still announces the file this mode does write', () => {
+      // The other half of the F4 fix: the wording dynamic-file mode prints is
+      // deliberately unchanged, byte for byte.
+      setupRepoForInstall(repo, 'dynamic-file');
+
+      const result = repo.runCli('bump --patch --non-interactive');
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(
+        '📝 Regenerating dynamic-version.local.json...',
+      );
     }, 30000);
   });
 });

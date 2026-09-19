@@ -536,9 +536,25 @@ async function bumpCommand(
   // Bump the version
   const result = await bumpVersion(bumpType, customVersionsToUpdate, silent);
 
-  // Regenerate dynamic version file
+  // Regenerate dynamic version file.
+  //
+  // version-manager-70i.13 F4: this used to announce the file unconditionally,
+  // so in package-json mode the tool named a file it does not produce (D12).
+  // The write decision is the same single decision generateVersionFile() makes
+  // below, so both read it from shouldWriteGeneratedFiles().
   if (!silent) {
-    console.log('📝 Regenerating dynamic-version.local.json...');
+    if (shouldWriteGeneratedFiles(getVersionMode(), output)) {
+      // The default wording is left exactly as it was, so dynamic-file mode's
+      // output is unchanged; an explicit --output names the path the user chose.
+      const target = output.explicit
+        ? output.path
+        : 'dynamic-version.local.json';
+      console.log(`📝 Regenerating ${target}...`);
+    } else {
+      console.log(
+        '📝 Recomputing version (this mode writes no version file)...',
+      );
+    }
   }
   await generateVersionFile(output, format, generateTypes, gitHook);
 
