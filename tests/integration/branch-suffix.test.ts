@@ -338,6 +338,32 @@ describe('branchSuffix knob', () => {
     );
   });
 
+  describe('sanitisation edge cases end to end (AC 3)', () => {
+    test(
+      'an all-digits branch name is prefixed with b, keeping the semver legal',
+      () => {
+        // A numeric prerelease identifier may not have a leading zero, so
+        // "007" would produce an INVALID semver without the prefix.
+        // The all-punctuation case is unit-tested only: git will not create a
+        // branch whose name sanitises to nothing.
+        setupDynamicFileModeRepo(repo, '0.1.0', 'add-to-patch', {
+          enabled: true,
+        });
+
+        expect(repo.runGit('checkout -b 007').exitCode).toBe(0);
+        repo.writeFile('a.txt', 'a\n');
+        repo.makeCommit('add a');
+
+        expect(repo.runCli('--silent').exitCode).toBe(0);
+        const version = readDynamicVersion(repo);
+
+        expect(version).toBe('0.1.1-b007.1');
+        expect(semver.valid(version)).toBe(version);
+      },
+      TEST_TIMEOUT_MS,
+    );
+  });
+
   describe('failure is not empty (AC 9)', () => {
     test(
       'unresolvable main branches fall back to the total commit count, loudly',
