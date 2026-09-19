@@ -240,7 +240,61 @@ export function setupPackageJsonModeRepo(
 }
 
 /**
- * Set up a repo in either versionMode that is ready for a real `install` run
+ * Set up a repo configured for `versionMode: 'event-log'`
+ * (version-manager-cza), ready for activateHooks().
+ *
+ * Deliberately does NOT create version.jsonl or .gitattributes: `install`
+ * does both (E4, E6), and a fixture that pre-creates them would hide whether
+ * it actually does. activateHooks() runs install and commits the result, so
+ * by the time a test makes its first commit the log is tracked and the union
+ * attribute is on the branch — which is the state a real project is in after
+ * following the README.
+ *
+ * The husky accommodations are the same as setupPackageJsonModeRepo(): see
+ * there for why.
+ */
+export function setupEventLogModeRepo(
+  repo: TestRepo,
+  packageVersion = '0.1.0',
+  versionCalculationMode: 'add-to-patch' | 'append-commits' = 'add-to-patch',
+  branchSuffix?: BranchSuffixFixtureConfig,
+): void {
+  repo.initGit();
+  repo.writeFile('README.md', '# Test Repo\n');
+  repo.makeCommit('Initial commit');
+
+  repo.writeFile(
+    'package.json',
+    JSON.stringify(
+      {
+        devDependencies: {husky: '^9.1.7'},
+        name: 'test-package',
+        version: packageVersion,
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+
+  repo.writeFile(
+    'version-manager.json',
+    JSON.stringify(
+      {
+        ...(branchSuffix === undefined ? {} : {branchSuffix}),
+        versionCalculationMode,
+        versionMode: 'event-log',
+        versions: {},
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  repo.writeFile('.gitignore', '*.local.json\n*.local.d.ts\nnode_modules/\n');
+  repo.makeCommit('Add version config files');
+}
+
+/**
+ * Set up a repo in any versionMode that is ready for a real `install` run
  * with no network access and nothing suppressed.
  *
  * Differences from the two fixtures above, both of which matter to what
@@ -259,7 +313,7 @@ export function setupPackageJsonModeRepo(
  */
 export function setupRepoForInstall(
   repo: TestRepo,
-  versionMode: 'dynamic-file' | 'package-json',
+  versionMode: 'dynamic-file' | 'event-log' | 'package-json',
   packageVersion = '0.1.0',
   mergeDriver?: MergeDriverFixtureConfig,
 ): void {
