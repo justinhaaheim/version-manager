@@ -340,6 +340,51 @@ Appends the commit count as build metadata.
 
 Best for pre-release/dev builds where you want to see commit count explicitly.
 
+## Branch Name Suffix (opt-in)
+
+Off by default. When enabled, a build made on a branch that is **not** one of the configured main branches carries a semver **prerelease** naming the branch and counting that branch's own commits:
+
+```json
+{
+  "versionCalculationMode": "add-to-patch",
+  "branchSuffix": {
+    "enabled": true,
+    "mainBranches": ["main", "master"]
+  }
+}
+```
+
+| On branch     | Computed version | With `branchSuffix` on |
+| ------------- | ---------------- | ---------------------- |
+| `main`        | `0.32.3`         | `0.32.3` (unchanged)   |
+| `feat/x`      | `0.32.3`         | `0.32.3-feat-x.3`      |
+| `feat/x`      | `0.32.1+3`       | `0.32.1-feat-x.3+3`    |
+| detached HEAD | `0.32.3`         | `0.32.3` (unchanged)   |
+
+`mainBranches` defaults to `["main", "master"]` and can be omitted, or set to whatever your repo uses (`["trunk"]`, `["develop", "main"]`, …).
+
+### What it is for
+
+Two branches that add the same number of commits otherwise compute the **same** version. In `package-json` mode that means git auto-merges the version field with no conflict and the merged result quietly undercounts the work it contains. The branch suffix makes the two sides structurally different, so that case becomes a **visible conflict** instead of a wrong answer.
+
+It does **not** reduce merge conflicts — it increases them. Both sides still rewrite the same line. What it removes is the silent-wrong-answer case.
+
+A build labelled `0.32.1-my-branch.3` is also identifiable on a device at a glance, which is the other reason to turn it on.
+
+### The details
+
+- **Format**: `<core>-<sanitised-branch>.<n>`, inserted before any `+build` metadata.
+- **`n`** is the number of commits this branch has of its own — `git rev-list --count <mainBranch>..HEAD` — plus one in `package-json` mode for the commit being made. If none of the configured main branches resolve, the total commit count is used instead and the CLI says so. If no count can be measured at all, **no suffix is applied** and the plain version is emitted; a failed measurement never becomes a `0`.
+- **`n === 0` means no suffix.** A branch with no commits of its own is identical to its base, so it keeps the undecorated version.
+- **Precedence**: a prerelease sorts _before_ the release it decorates, so `0.32.3-feat-x.3 < 0.32.3`. That is intended: a branch build is a prerelease of the version it will become. Unlike `+N` build metadata, a prerelease is **not** stripped by `npm publish`.
+- **Sanitisation**: every character outside `[0-9A-Za-z-]` becomes `-`, runs of `-` collapse, leading/trailing `-` are trimmed; an empty result becomes `branch`, and an all-digits result is prefixed with `b` (`007` → `b007`). This is lossy: `feat/x` and `feat-x` both produce `feat-x`.
+
+### Limitation: version-manager owns the prerelease segment
+
+While `branchSuffix.enabled` is `true`, version-manager **owns** the prerelease part of the version. Every computation strips whatever prerelease it finds and re-applies a freshly computed one, so a hand-authored prerelease in `package.json` (`1.0.0-beta.1`) is **discarded** on the next generated version.
+
+This is deliberate. In `package-json` mode the decorated version is committed into `package.json` and read back as the input to the next computation; without stripping, the suffix would compound, or the version would freeze in place with no error at all. If you hand-manage prerelease versions, leave this knob off.
+
 ## TypeScript Support
 
 The package includes full TypeScript definitions. For the generated file:
