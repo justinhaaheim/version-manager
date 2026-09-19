@@ -32,17 +32,21 @@ describe('package-json version mode', () => {
   });
 
   describe('hook installation', () => {
-    test('installs a pre-commit hook and no post-commit hook', () => {
+    test('installs a pre-commit hook and no post-* hooks at all', () => {
+      // CHANGED BY version-manager-70i.2: post-checkout/merge/rewrite used to
+      // be installed here. Their only job was regenerating
+      // dynamic-version.local.json, which this mode no longer produces, so
+      // they ran the CLI on every checkout to write nothing. post-commit was
+      // always absent because pre-commit covers the commit itself.
       setupPackageJsonModeRepo(repo);
       activateHooks(repo);
 
       expect(repo.fileExists('.husky/pre-commit')).toBe(true);
-      expect(repo.fileExists('.husky/post-checkout')).toBe(true);
-      expect(repo.fileExists('.husky/post-merge')).toBe(true);
-      expect(repo.fileExists('.husky/post-rewrite')).toBe(true);
 
-      // post-commit belongs to dynamic-file mode only
       expect(repo.fileExists('.husky/post-commit')).toBe(false);
+      expect(repo.fileExists('.husky/post-checkout')).toBe(false);
+      expect(repo.fileExists('.husky/post-merge')).toBe(false);
+      expect(repo.fileExists('.husky/post-rewrite')).toBe(false);
     });
 
     test('pre-commit hook carries the --pre-commit flag', () => {
@@ -433,7 +437,10 @@ describe('package-json version mode', () => {
   });
 
   describe("Justin's question: is dynamic-version.local.json still produced?", () => {
-    test('the pre-commit hook still writes dynamic-version.local.json', () => {
+    test('no: the pre-commit hook writes no dynamic-version.local.json (70i.2)', () => {
+      // The answer used to be yes, which is what made the mode only half a
+      // solution. tests/integration/generated-file-policy.test.ts sweeps the
+      // whole repo; this keeps the answer next to the question.
       setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
       activateHooks(repo);
 
@@ -441,8 +448,9 @@ describe('package-json version mode', () => {
       repo.runGit('add -A');
       repo.runGit('commit -m "first"');
 
-      expect(repo.fileExists('dynamic-version.local.json')).toBe(true);
-    });
+      expect(repo.fileExists('dynamic-version.local.json')).toBe(false);
+      expect(repo.fileExists('dynamic-version.local.d.ts')).toBe(false);
+    }, 30000);
 
     test('package.json alone is enough to read the version (no generated file needed)', () => {
       setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');

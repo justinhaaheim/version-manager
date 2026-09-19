@@ -222,6 +222,63 @@ export function setupPackageJsonModeRepo(
 }
 
 /**
+ * Set up a repo in either versionMode that is ready for a real `install` run
+ * with no network access and nothing suppressed.
+ *
+ * Differences from the two fixtures above, both of which matter to what
+ * `install` does (version-manager-70i.2):
+ *
+ * 1. `.gitignore` is left UNTRACKED and carries only `node_modules/`, because
+ *    ensureGitignoreEntries() refuses to touch a tracked .gitignore. A
+ *    committed .gitignore would make install's gitignore behaviour
+ *    unobservable — it would be skipped in both modes for the wrong reason.
+ * 2. `.husky/` is pre-created and husky is declared in devDependencies, so
+ *    installGitHooks() neither installs husky nor shells out to `husky init`.
+ *
+ * The hooks are NOT rewritten to run the local source tree here: these
+ * fixtures exist to inspect what install WRITES, not to execute it. Use
+ * setupPackageJsonModeRepo() + activateHooks() to run hooks for real.
+ */
+export function setupRepoForInstall(
+  repo: TestRepo,
+  versionMode: 'dynamic-file' | 'package-json',
+  packageVersion = '0.1.0',
+): void {
+  repo.initGit();
+  repo.writeFile('README.md', '# Test Repo\n');
+  repo.makeCommit('Initial commit');
+
+  repo.writeFile(
+    'package.json',
+    JSON.stringify(
+      {
+        devDependencies: {husky: '^9.1.7'},
+        name: 'test-package',
+        version: packageVersion,
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+
+  repo.writeFile(
+    'version-manager.json',
+    JSON.stringify(
+      {versionCalculationMode: 'add-to-patch', versionMode, versions: {}},
+      null,
+      2,
+    ) + '\n',
+  );
+
+  repo.runGit('add package.json version-manager.json');
+  repo.makeCommit('Add version config files', false);
+
+  // Written after the commit, and never staged, so it stays untracked.
+  repo.writeFile('.gitignore', 'node_modules/\n');
+  repo.writeFile('.husky/.keep', '');
+}
+
+/**
  * Install git hooks into a fixture repo and make them executable by real git.
  * See setupPackageJsonModeRepo() for why the rewriting is necessary.
  */
