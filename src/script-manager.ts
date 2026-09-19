@@ -332,7 +332,9 @@ export function readPreCommitBaseVersion(): PreCommitBaseVersion | null {
  * by the time this runs — readPreCommitBaseVersion() throws otherwise — so in
  * practice the tolerant branch only ever applies to the working-tree file.)
  *
- * Exported for its unit tests; nothing outside this module calls it.
+ * Exported for its unit tests, and called by the merge driver
+ * (src/merge-driver.ts), which demands the same post-condition of the copies
+ * it rewrites before a merge.
  *
  * @param label - What to name in the error, e.g. the file's path
  * @param newVersion - The version the replacement was supposed to write
