@@ -832,6 +832,43 @@ describe('package-json version mode', () => {
       expect(repo.runGit('rev-parse HEAD').stdout.trim()).toBe(headBefore);
     }, 30000);
 
+    test('a replacement that did not take aborts the commit (F7)', () => {
+      // THE HAND-ROLLED SCANNER AND JSON.parse CAN DISAGREE, and this is the
+      // case where they do: two top-level `version` keys is valid JSON whose
+      // value is the LAST one, while src/json-text-edit.ts replaces the
+      // FIRST. Without the post-condition check the hook rewrites the file to
+      // no effect and the commit records the old version — a silent
+      // corruption of the one file this mode exists to keep correct.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+
+      const duplicated = [
+        '{',
+        '  "version": "0.1.0",',
+        '  "name": "test-package",',
+        '  "devDependencies": {"husky": "^9.1.7"},',
+        '  "version": "9.9.9"',
+        '}',
+        '',
+      ].join('\n');
+      repo.writeFile('package.json', duplicated);
+      activateHooks(repo);
+
+      const headBefore = repo.runGit('rev-parse HEAD').stdout.trim();
+
+      repo.writeFile('a.txt', 'a\n');
+      repo.runGit('add a.txt');
+      const commit = repo.runGit('commit -m "first"');
+
+      expect(commit.exitCode).not.toBe(0);
+      expect(commit.stderr).toContain('Refusing to write');
+      expect(commit.stderr).toContain('9.9.9');
+      expect(repo.runGit('rev-parse HEAD').stdout.trim()).toBe(headBefore);
+
+      // Nothing was written: the guard runs before either write.
+      expect(repo.readFile('package.json')).toBe(duplicated);
+      expect(indexVersion(repo)).toBe('9.9.9');
+    }, 30000);
+
     test('install --no-fail writes no --no-fail into the pre-commit hook', () => {
       setupRepoForInstall(repo, 'package-json');
 

@@ -305,6 +305,79 @@ export function readPreCommitBaseVersion(): PreCommitBaseVersion | null {
 }
 
 /**
+ * Check what the scanner actually produced, before anyone writes it
+ * (version-manager-70i.13 F7).
+ *
+ * replaceTopLevelStringValue() is a hand-rolled JSON scanner. It is careful
+ * and it has its own unit tests, but it is the one place in this codebase
+ * where a parser bug would corrupt a user's package.json SILENTLY — written
+ * into the index and the working tree, committed, and only noticed later by
+ * something else that cannot read the file. That is precisely the failure
+ * shape critical rule 6 exists to prevent, so the result is checked against
+ * plain JSON.parse before it is written anywhere.
+ *
+ * It catches a real disagreement, not just a hypothetical bug: a package.json
+ * with two top-level `version` keys is valid JSON whose value is the LAST
+ * one, while the scanner replaces the FIRST. Without this check that file
+ * gets rewritten to no effect and the commit records the old version.
+ *
+ * WHY THE CHECK IS CONDITIONAL ON THE INPUT PARSING. The working-tree
+ * package.json may be mid-edit and not valid JSON at all — that is the case
+ * D9 exists to protect, and the author's own broken file is not this hook's
+ * to block a commit over. So when the input does not parse, the surgical
+ * replacement is the best that can be offered and no post-condition is
+ * demanded of the output. When the input DOES parse, the output must parse
+ * too and must carry exactly the version intended; anything else is a bug in
+ * the scanner and must not reach the disk. (The index content always parses
+ * by the time this runs — readPreCommitBaseVersion() throws otherwise — so in
+ * practice the tolerant branch only ever applies to the working-tree file.)
+ *
+ * Exported for its unit tests; nothing outside this module calls it.
+ *
+ * @param label - What to name in the error, e.g. the file's path
+ * @param newVersion - The version the replacement was supposed to write
+ * @param original - The text handed to the scanner
+ * @param replaced - The text the scanner returned
+ * @throws If the input parsed but the output does not, or does not carry
+ *   `newVersion` as its top-level version
+ */
+export function assertVersionReplaced({
+  label,
+  newVersion,
+  original,
+  replaced,
+}: {
+  label: string;
+  newVersion: string;
+  original: string;
+  replaced: string;
+}): void {
+  try {
+    JSON.parse(original);
+  } catch {
+    return;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(replaced);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Refusing to write ${label}: setting the version to ${newVersion} produced text that is no longer valid JSON (${message}). This is a bug in the version replacement, not in your package.json — nothing was written.`,
+    );
+  }
+
+  const version = (parsed as {version?: unknown}).version;
+
+  if (version !== newVersion) {
+    throw new Error(
+      `Refusing to write ${label}: after setting the version to ${newVersion} the file's top-level version reads ${JSON.stringify(version)}. Two top-level "version" keys will do this. Nothing was written.`,
+    );
+  }
+}
+
+/**
  * Write the version computed for the commit that is about to happen.
  *
  * Two writes, one string (version-manager-70i.3, D9):
@@ -319,9 +392,10 @@ export function readPreCommitBaseVersion(): PreCommitBaseVersion | null {
  *    a half-finished edit gets destroyed, which is the harm this bead exists
  *    to prevent.
  *
- * Both replacements are computed before either is written, so the common
- * failure — no top-level `version` to replace — cannot leave the index and
- * the working tree disagreeing.
+ * Both replacements are computed AND CHECKED before either is written, so
+ * neither the common failure — no top-level `version` to replace — nor a
+ * scanner that produced the wrong text can leave the index and the working
+ * tree disagreeing. See assertVersionReplaced() for what is checked.
  *
  * FAILURE ABORTS THE COMMIT (version-manager-70i.4, D10). Nothing here
  * returns a status for a caller to ignore: every failure throws, naming the
@@ -360,6 +434,13 @@ export function writePreCommitVersion(newVersion: string): void {
         'Failed to update package.json version: the package.json staged in the git index has no top-level "version" string.',
       );
     }
+
+    assertVersionReplaced({
+      label: 'the package.json staged in the git index',
+      newVersion,
+      original: entry.content,
+      replaced: newIndexContent,
+    });
   }
 
   if (!existsSync(workingTreePath)) {
@@ -368,8 +449,9 @@ export function writePreCommitVersion(newVersion: string): void {
     );
   }
 
+  const workingTreeContent = readFileSync(workingTreePath, 'utf-8');
   const newWorkingTreeContent = replaceTopLevelStringValue(
-    readFileSync(workingTreePath, 'utf-8'),
+    workingTreeContent,
     'version',
     newVersion,
   );
@@ -379,6 +461,13 @@ export function writePreCommitVersion(newVersion: string): void {
       'Failed to update package.json version: the working-tree package.json has no top-level "version" string.',
     );
   }
+
+  assertVersionReplaced({
+    label: workingTreePath,
+    newVersion,
+    original: workingTreeContent,
+    replaced: newWorkingTreeContent,
+  });
 
   // The entry exactly as git had it, kept only so the write below can put it
   // back. Null means the index was never touched, so there is nothing to undo.
