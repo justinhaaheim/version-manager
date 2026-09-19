@@ -371,10 +371,18 @@ describe('package-json version mode', () => {
       // scenario becomes a VISIBLE CONFLICT instead of a clean auto-merge
       // that silently undercounts. The suffix does not reduce conflicts —
       // it converts a wrong answer into a stopped merge.
+      //
+      // THE MERGE DRIVER IS REMOVED HERE ON PURPOSE (70i.8). Install now
+      // registers a driver that resolves precisely this conflict by taking
+      // ours, which is D11's deliberate policy — so without this line the
+      // test would measure the driver instead of the suffix. The with-driver
+      // outcome is asserted at the bottom of this test and in
+      // tests/integration/merge-driver.test.ts.
       setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch', {
         enabled: true,
       });
       activateHooks(repo);
+      repo.runGit('config --remove-section merge.version-manager');
 
       const base = repo.runGit('rev-parse --abbrev-ref HEAD').stdout.trim();
       expect(['main', 'master']).toContain(base);
@@ -400,14 +408,41 @@ describe('package-json version mode', () => {
 
       expect(merge.exitCode).not.toBe(0);
       expect(merge.stdout + merge.stderr).toContain('package.json');
+
+      // NOW PUT THE DRIVER BACK and run the same merge: the conflict the
+      // suffix made visible is resolved by policy to OURS (D11). The commits
+      // the branch carried are not counted in main's version, which is the
+      // decision, not an accident — main's version counts what landed on
+      // main. This is the interaction between 70i.10 and 70i.8, and nothing
+      // else pins it.
+      repo.runGit('merge --abort');
+      repo.runCli('install --silent --non-interactive');
+      const cliPath = path.join(__dirname, '..', '..', 'src', 'index.ts');
+      repo.runGit(
+        `config merge.version-manager.driver ${JSON.stringify(
+          `bun ${cliPath} merge-driver %O %A %B`,
+        )}`,
+      );
+
+      const withDriver = repo.runGit('merge --no-ff feature -m "merge again"');
+
+      expect(withDriver.exitCode).toBe(0);
+      expect(repo.readPackageJson().version).toBe(baseVersion);
     }, 30000);
 
     test('branches of UNEQUAL length conflict on package.json', () => {
       // DOCUMENTS THE CENTRAL TRADE-OFF: as soon as the two sides compute
       // different versions, every merge stops on a package.json conflict.
-      // This is what blocks GitHub's merge button on a real PR.
+      // This is what blocks GitHub's merge button on a real PR — GitHub does
+      // not apply .gitattributes merge drivers, so this is still what a PR
+      // looks like even with the driver installed (70i.8).
+      //
+      // The driver is removed so this measures git's own behaviour; the
+      // with-driver outcome for the same shape is AC1 in
+      // tests/integration/merge-driver.test.ts.
       setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
       activateHooks(repo);
+      repo.runGit('config --remove-section merge.version-manager');
 
       const base = repo.runGit('rev-parse --abbrev-ref HEAD').stdout.trim();
 

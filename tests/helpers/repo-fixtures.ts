@@ -317,10 +317,30 @@ export function activateHooks(repo: TestRepo): void {
     fs.chmodSync(path.join(repo.getPath(), '.husky', hookName), 0o755);
   }
 
+  // In package-json mode install also registers the merge driver
+  // (version-manager-70i.8). Its git config value carries the same
+  // unresolvable npx prefix the hooks do, so it gets the same rewrite.
+  const configuredDriver = repo
+    .runGit('config --get merge.version-manager.driver')
+    .stdout.trim();
+
+  if (configuredDriver !== '') {
+    const localDriver = configuredDriver
+      .split('npx @justinhaaheim/version-manager')
+      .join(`bun ${cliPath}`);
+    repo.runGit(
+      `config merge.version-manager.driver ${JSON.stringify(localDriver)}`,
+    );
+  }
+
   // Commit the hooks so they survive branch switches, exactly as a real repo
   // does. Amending the existing config commit (rather than adding a new one)
   // keeps the commit count clean, so tests can count bumps from a known base.
   // --no-verify stops this setup step from bumping the version itself.
+  //
+  // .gitattributes is committed by the same `add -A`, which is what a real
+  // repo does too — the attribute must be on every branch for the driver to
+  // apply, while the git config half by design never travels.
   repo.runGit('add -A');
   repo.runGit('commit --amend --no-verify --no-edit');
 }

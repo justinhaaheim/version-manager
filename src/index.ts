@@ -14,8 +14,13 @@ import {
   shouldWriteGeneratedFiles,
   writeGeneratedFiles,
 } from './generated-file-policy';
-import {installGitHooks} from './git-hooks-manager';
+import {detectRunCommand, installGitHooks} from './git-hooks-manager';
 import {isFileTrackedByGit} from './git-utils';
+import {
+  MERGE_DRIVER_ATTRIBUTE,
+  registerMergeDriver,
+  runMergeDriver,
+} from './merge-driver';
 import {
   formatVersionOutput,
   type OutputFormat,
@@ -400,6 +405,40 @@ async function installCommand(
   }
 
   installGitHooks(incrementPatch, silent, noFail, versionMode);
+
+  // The merge driver belongs to package-json mode only (version-manager-70i.8,
+  // D11). That mode rewrites the version on every commit, so two branches that
+  // both commit ALWAYS conflict on that line; dynamic-file mode changes
+  // package.json's version only when someone bumps it deliberately, and
+  // silently picking a side of a deliberate bump is not something to install
+  // on anyone's behalf. A failure here is not caught: an install that reports
+  // success while the driver is not registered would send the author looking
+  // at git the next time a merge conflicts.
+  if (versionMode === 'package-json') {
+    const registration = registerMergeDriver(detectRunCommand(silent));
+
+    if (registration.gitAttributes === 'claimed-by-another') {
+      console.warn(
+        `⚠️  .gitattributes already points package.json at a different merge driver, so it was left alone. Add \`${MERGE_DRIVER_ATTRIBUTE}\` yourself if you want version-manager to resolve package.json merges.`,
+      );
+    }
+
+    if (!silent) {
+      console.log('\n🔀 Registering the package.json merge driver...');
+      console.log(`   git config merge driver: ${registration.gitConfig}`);
+      console.log(`   .gitattributes: ${registration.gitAttributes}`);
+      console.log(
+        '   Local merges and squashes keep OUR version (the branch merged into).',
+      );
+      console.log(
+        "   GitHub's merge buttons do NOT run merge drivers, so a PR whose",
+      );
+      console.log(
+        '   package.json versions diverge still conflicts there. Merge locally',
+      );
+      console.log('   or resolve it by hand.');
+    }
+  }
 
   if (!silent) {
     console.log('✅ Git hooks installed successfully');
@@ -881,6 +920,41 @@ async function main() {
             args.message,
             args['git-hook'],
           );
+        },
+      )
+      .command(
+        'merge-driver <ancestor> <ours> <theirs>',
+        false, // Hidden: git invokes this, people do not.
+        (yargsInstance) =>
+          yargsInstance
+            .positional('ancestor', {
+              describe: 'The merge base copy of package.json (git %O)',
+              type: 'string' as const,
+            })
+            .positional('ours', {
+              describe:
+                'Our copy of package.json, and where the result must be left (git %A)',
+              type: 'string' as const,
+            })
+            .positional('theirs', {
+              describe: 'Their copy of package.json (git %B)',
+              type: 'string' as const,
+            }),
+        (args) => {
+          const result = runMergeDriver({
+            ancestor: args.ancestor ?? '',
+            ours: args.ours ?? '',
+            theirs: args.theirs ?? '',
+          });
+
+          if (result.note !== null) {
+            console.warn(result.note);
+          }
+
+          // git reads the exit status directly: 0 merged cleanly, non-zero
+          // means conflicts. Exiting here rather than returning keeps main()'s
+          // process.exit(0) from reporting every conflict as a clean merge.
+          process.exit(result.exitCode);
         },
       )
       .command(

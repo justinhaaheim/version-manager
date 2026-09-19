@@ -223,9 +223,13 @@ ${command}
 }
 
 /**
- * Detect the run command for version-manager (handles dev environment)
+ * Detect the run command for version-manager (handles dev environment).
+ *
+ * Exported so the merge-driver registration writes the SAME invocation the
+ * hooks use (version-manager-70i.8). Two different spellings of "run
+ * version-manager" in one repository would be a maintenance trap.
  */
-function detectRunCommand(silent: boolean): string {
+export function detectRunCommand(silent: boolean): string {
   const currentPackageJsonPath = join(process.cwd(), 'package.json');
   let runCommand = 'npx @justinhaaheim/version-manager';
 
