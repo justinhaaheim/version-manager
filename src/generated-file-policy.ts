@@ -19,7 +19,7 @@ export const DEFAULT_OUTPUT_PATH = './dynamic-version.local.json';
  * whether a human asked for it.
  */
 export interface OutputPathOption {
-  /** True only when --output/-o was present on the command line. */
+  /** True only when --output/-o named a path on the command line. */
   explicit: boolean;
   /** The path to write to if a write happens at all. */
   path: string;
