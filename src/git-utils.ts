@@ -32,14 +32,43 @@ export interface GitIndexEntry {
   repoPath: string;
 }
 
-/** `git <args>` from the current directory, output untouched. */
+/**
+ * `git <args>` from the current directory, output untouched.
+ *
+ * A failure throws, and the thrown message NAMES THE COMMAND AND CARRIES
+ * GIT'S STDERR (version-manager-70i.4, D10). stderr is piped rather than
+ * inherited for exactly that reason: this runs inside a git hook, where the
+ * one thing the author will see is the message that aborts their commit, and
+ * "Command failed: git update-index" without git's own explanation sends them
+ * looking in the wrong place.
+ *
+ * @throws If git cannot be run, or exits non-zero
+ */
 function gitSync(args: string[], input?: string): string {
-  return execFileSync('git', args, {
-    cwd: process.cwd(),
-    encoding: 'utf-8',
-    ...(input === undefined ? {} : {input}),
-    maxBuffer: GIT_MAX_BUFFER,
-  });
+  const printable = `git ${args.join(' ')}`;
+
+  try {
+    return execFileSync('git', args, {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+      ...(input === undefined ? {} : {input}),
+      maxBuffer: GIT_MAX_BUFFER,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    const failure = error as {status?: number; stderr?: Buffer | string};
+    const stderr = failure.stderr?.toString().trim() ?? '';
+    const status =
+      typeof failure.status === 'number' ? ` (exit ${failure.status})` : '';
+    const detail =
+      stderr === ''
+        ? error instanceof Error
+          ? error.message
+          : String(error)
+        : stderr;
+
+    throw new Error(`\`${printable}\` failed${status}: ${detail}`);
+  }
 }
 
 /**

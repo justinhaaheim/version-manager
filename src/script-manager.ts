@@ -1,7 +1,7 @@
 import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
-import {readIndexEntry, writeIndexEntry} from './git-utils';
+import {type GitIndexEntry, readIndexEntry, writeIndexEntry} from './git-utils';
 import {replaceTopLevelStringValue} from './json-text-edit';
 
 interface PackageJson {
@@ -323,10 +323,27 @@ export function readPreCommitBaseVersion(): PreCommitBaseVersion | null {
  * failure — no top-level `version` to replace — cannot leave the index and
  * the working tree disagreeing.
  *
+ * FAILURE ABORTS THE COMMIT (version-manager-70i.4, D10). Nothing here
+ * returns a status for a caller to ignore: every failure throws, naming the
+ * file and the operation. A blocked commit is strictly better than a commit
+ * that records a version different from the one on disk, and `--no-verify`
+ * self-heals on the next hooked commit by design.
+ *
+ * ORDER MATTERS, and it is index-then-working-tree:
+ *
+ * - If the index write fails, the working tree has not been touched yet, so
+ *   the repository is exactly as it was. The next hooked commit recomputes
+ *   from the same index and lands on the same version.
+ * - If the WORKING-TREE write then fails, the index is rolled back to the
+ *   content it held before. Without that, the index would keep a version the
+ *   aborted commit never recorded, and the next hooked commit would read it
+ *   back as its base and skip a version.
+ *
  * @param newVersion - The version string to record
- * @returns True if successful, false otherwise
+ * @throws If package.json has no top-level `version` to replace, if it is
+ *   missing from the working tree, or if either write fails
  */
-export function writePreCommitVersion(newVersion: string): boolean {
+export function writePreCommitVersion(newVersion: string): void {
   const entry = readIndexEntry(PACKAGE_JSON);
   const workingTreePath = join(process.cwd(), PACKAGE_JSON);
 
@@ -339,18 +356,16 @@ export function writePreCommitVersion(newVersion: string): boolean {
     );
 
     if (newIndexContent === null) {
-      console.error(
+      throw new Error(
         'Failed to update package.json version: the package.json staged in the git index has no top-level "version" string.',
       );
-      return false;
     }
   }
 
   if (!existsSync(workingTreePath)) {
-    console.error(
+    throw new Error(
       'Failed to update package.json version: package.json is in the git index but missing from the working tree.',
     );
-    return false;
   }
 
   const newWorkingTreeContent = replaceTopLevelStringValue(
@@ -360,18 +375,51 @@ export function writePreCommitVersion(newVersion: string): boolean {
   );
 
   if (newWorkingTreeContent === null) {
-    console.error(
+    throw new Error(
       'Failed to update package.json version: the working-tree package.json has no top-level "version" string.',
     );
-    return false;
   }
 
+  // The entry exactly as git had it, kept only so the write below can put it
+  // back. Null means the index was never touched, so there is nothing to undo.
+  let rollbackEntry: GitIndexEntry | null = null;
   if (entry !== null && newIndexContent !== null) {
+    // Throws with the failing git command and git's stderr (gitSync).
     writeIndexEntry({...entry, content: newIndexContent});
+    rollbackEntry = entry;
   }
 
-  writeFileSync(workingTreePath, newWorkingTreeContent);
-  return true;
+  try {
+    writeFileSync(workingTreePath, newWorkingTreeContent);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (rollbackEntry === null) {
+      throw new Error(
+        `Failed to write ${workingTreePath}: ${message}. Nothing was changed.`,
+      );
+    }
+
+    // Put the index back the way it was. A rollback that ITSELF fails must
+    // not hide the original failure, and must not be reported as a clean
+    // abort either — both go in the message.
+    try {
+      writeIndexEntry(rollbackEntry);
+    } catch (rollbackError) {
+      const rollbackMessage =
+        rollbackError instanceof Error
+          ? rollbackError.message
+          : String(rollbackError);
+
+      throw new Error(
+        `Failed to write ${workingTreePath}: ${message}. The git index was already updated to version ${newVersion} and could NOT be rolled back: ${rollbackMessage}. Run \`git checkout -- package.json\` or re-stage package.json before committing again.`,
+      );
+    }
+
+    throw new Error(
+      `Failed to write ${workingTreePath}: ${message}. The git index was rolled back, so nothing was changed.`,
+    );
+  }
 }
 
 // THREE FUNCTIONS WERE REMOVED HERE by version-manager-70i.5: the lockfile

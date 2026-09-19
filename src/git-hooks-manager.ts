@@ -308,10 +308,17 @@ export function installGitHooks(
   const nonFatalSuffix = ` || echo "WARNING: version-manager hook failed (non-fatal). If this is a fresh checkout/worktree, run 'bun install'."`;
 
   if (versionMode === 'package-json') {
-    // Pre-commit hook: updates package.json version and stages files.
-    // Deliberately NOT suffixed with nonFatalSuffix: if this hook fails the
-    // commit must abort, otherwise the commit silently records a stale version.
-    const preCommitCommand = `${runCommand} --pre-commit${silentFlag}${noFailFlag}`;
+    // Pre-commit hook: writes the computed version into package.json and into
+    // the git index.
+    //
+    // Deliberately NOT suffixed with nonFatalSuffix, and deliberately WITHOUT
+    // noFailFlag (version-manager-70i.4, D10): if this hook fails the commit
+    // must abort, otherwise the commit silently records a version that is not
+    // the one that was computed. `--no-fail` is honoured on every other path,
+    // where the worst case is a stale generated file rather than a wrong
+    // committed version; the CLI ignores it for --pre-commit runs too, so a
+    // hand-edited hook cannot reintroduce the hole either.
+    const preCommitCommand = `${runCommand} --pre-commit${silentFlag}`;
     installOrUpdateHook(huskyDir, 'pre-commit', preCommitCommand, silent);
 
     // No post-* hooks in this mode (version-manager-70i.2, D12). The only job

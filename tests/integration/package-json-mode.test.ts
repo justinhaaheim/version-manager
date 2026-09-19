@@ -1,4 +1,5 @@
 import {afterEach, beforeEach, describe, expect, test} from 'bun:test';
+import {execSync} from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -6,6 +7,7 @@ import {
   activateHooks,
   setupBasicRepo,
   setupPackageJsonModeRepo,
+  setupRepoForInstall,
 } from '../helpers/repo-fixtures';
 import {TestRepo} from '../helpers/test-repo';
 
@@ -52,6 +54,72 @@ function statusOf(repo: TestRepo, filePath: string): string | null {
     .find((candidate) => candidate.endsWith(` ${filePath}`));
 
   return line === undefined ? null : line.slice(0, 2);
+}
+
+/** The version in the package.json STAGED IN THE INDEX, not the working tree. */
+function indexVersion(repo: TestRepo): string {
+  return (
+    JSON.parse(repo.runGit('show :package.json').stdout) as {version: string}
+  ).version;
+}
+
+/** The version in the package.json recorded by the HEAD commit. */
+function headVersion(repo: TestRepo): string {
+  return (
+    JSON.parse(repo.runGit('show HEAD:package.json').stdout) as {
+      version: string;
+    }
+  ).version;
+}
+
+/**
+ * Make ONE git subcommand fail inside the hook, passing every other
+ * invocation through to the real git.
+ *
+ * This is how a staging failure is induced for real (70i.4 AC1) rather than
+ * mocked: only the hook's own call to that subcommand breaks, while the `git
+ * commit` that triggered the hook, and all the hook's reads, run normally.
+ * The stub touches a marker file when it intercepts, so a test can prove the
+ * induction actually happened rather than passing for some other reason.
+ *
+ * THE STUB IS DELIVERED VIA GIT_EXEC_PATH, NOT VIA PATH, and that is not
+ * decoration: git PREPENDS its exec-path to PATH before running a hook, and
+ * on macOS that directory contains a `git` binary of its own — so a stub
+ * merely first on PATH is shadowed and never called (measured: the hook's
+ * thirteen git invocations all reached the real binary). Pointing
+ * GIT_EXEC_PATH at our own directory puts the stub in that same privileged
+ * position. A directory holding only the stub is enough; `git commit` needs
+ * no helper from exec-path.
+ *
+ * @param repo - The fixture repo; the stub lives inside it and dies with it
+ * @param subcommand - The git subcommand to fail, matched as the first argument
+ * @returns The env overrides to run git with, and the marker file's path
+ */
+function stubFailingGit(
+  repo: TestRepo,
+  subcommand: string,
+): {envOverrides: Record<string, string>; marker: string} {
+  const realGit = execSync('command -v git', {encoding: 'utf-8'}).trim();
+  const stubDir = path.join(repo.getPath(), 'stub-git-exec-path');
+  const marker = path.join(repo.getPath(), `stub-git-${subcommand}-was-called`);
+
+  fs.mkdirSync(stubDir, {recursive: true});
+  fs.writeFileSync(
+    path.join(stubDir, 'git'),
+    [
+      '#!/bin/sh',
+      `if [ "$1" = "${subcommand}" ]; then`,
+      `  touch "${marker}"`,
+      `  echo "stub git: deliberate ${subcommand} failure" >&2`,
+      '  exit 1',
+      'fi',
+      `exec "${realGit}" "$@"`,
+      '',
+    ].join('\n'),
+  );
+  fs.chmodSync(path.join(stubDir, 'git'), 0o755);
+
+  return {envOverrides: {GIT_EXEC_PATH: stubDir}, marker};
 }
 
 /**
@@ -657,6 +725,124 @@ describe('package-json version mode', () => {
         repo.runGit('show HEAD:package.json').stdout,
       ) as {version: string};
       expect(committed.version).toBe('0.1.1');
+    }, 30000);
+  });
+
+  describe('failing loudly (70i.4, D10)', () => {
+    test('a failed index write aborts the commit and names the command', () => {
+      // THE FAILURE IS INDUCED, NOT MOCKED. A stub `git` first on PATH fails
+      // `git update-index` — the one call that puts the new version into the
+      // index — and execs the real git for everything else, so the `git
+      // commit` that triggered the hook and every read the hook does behave
+      // normally. Mocking the function away would prove only that the mock
+      // was called.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+      activateHooks(repo);
+
+      const headBefore = repo.runGit('rev-parse HEAD').stdout.trim();
+      const stub = stubFailingGit(repo, 'update-index');
+
+      repo.writeFile('a.txt', 'a\n');
+      repo.runGit('add a.txt');
+      const commit = repo.runGit('commit -m "first"', stub.envOverrides);
+
+      // Guard against passing for the wrong reason: the induction happened.
+      expect(fs.existsSync(stub.marker)).toBe(true);
+
+      // The commit is BLOCKED, not quietly completed with a stale version.
+      expect(commit.exitCode).not.toBe(0);
+      expect(commit.stderr).toContain('git update-index');
+      expect(commit.stderr).toContain('deliberate update-index failure');
+      expect(repo.runGit('rev-parse HEAD').stdout.trim()).toBe(headBefore);
+
+      // AC2: nothing is half-updated. The index write is attempted before the
+      // working-tree write for exactly this reason, so both are still at the
+      // version the commit was going to be made from.
+      expect(repo.readPackageJson().version).toBe('0.1.0');
+      expect(indexVersion(repo)).toBe('0.1.0');
+
+      // AC2, the part that matters: the NEXT hooked commit is right. 0.1.2
+      // here would mean the aborted attempt had left a bump behind.
+      const retry = repo.runGit('commit -m "first"');
+      expect(retry.exitCode).toBe(0);
+      expect(repo.readPackageJson().version).toBe('0.1.1');
+      expect(headVersion(repo)).toBe('0.1.1');
+    }, 30000);
+
+    test('a failed working-tree write rolls the index back', () => {
+      // The other order of the same failure, induced with file permissions:
+      // the index write succeeds and writing package.json then fails. Left
+      // alone, the index would keep a version the aborted commit never
+      // recorded, and the next hooked commit would read it back as its base
+      // and skip a version.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+      activateHooks(repo);
+
+      const headBefore = repo.runGit('rev-parse HEAD').stdout.trim();
+      const packageJsonPath = path.join(repo.getPath(), 'package.json');
+      fs.chmodSync(packageJsonPath, 0o444);
+
+      repo.writeFile('a.txt', 'a\n');
+      repo.runGit('add a.txt');
+      const commit = repo.runGit('commit -m "first"');
+
+      expect(commit.exitCode).not.toBe(0);
+      expect(commit.stderr).toContain('package.json');
+      expect(commit.stderr).toContain('rolled back');
+      expect(repo.runGit('rev-parse HEAD').stdout.trim()).toBe(headBefore);
+
+      // The rollback is the assertion: the index is back at the version it
+      // held before the hook ran.
+      expect(indexVersion(repo)).toBe('0.1.0');
+
+      fs.chmodSync(packageJsonPath, 0o644);
+
+      const retry = repo.runGit('commit -m "first"');
+      expect(retry.exitCode).toBe(0);
+      expect(headVersion(repo)).toBe('0.1.1');
+    }, 30000);
+
+    test('--no-fail cannot turn a pre-commit failure into a successful commit', () => {
+      // `--no-fail` means "a version-generation hiccup must not break the
+      // thing that invoked us" — right for a post-checkout hook, and exactly
+      // wrong here, where it would mean "commit the wrong version anyway".
+      // installGitHooks() no longer writes the flag into this hook; this pins
+      // the other half, that the CLI ignores it even when a hand-edited hook
+      // passes it.
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+      activateHooks(repo);
+
+      const hookPath = path.join(repo.getPath(), '.husky', 'pre-commit');
+      const patched = repo
+        .readFile('.husky/pre-commit')
+        .replace('--pre-commit', '--pre-commit --no-fail');
+      expect(patched).toContain('--no-fail');
+      repo.writeFile('.husky/pre-commit', patched);
+      fs.chmodSync(hookPath, 0o755);
+
+      const headBefore = repo.runGit('rev-parse HEAD').stdout.trim();
+      const stub = stubFailingGit(repo, 'update-index');
+
+      repo.writeFile('a.txt', 'a\n');
+      repo.runGit('add a.txt');
+      const commit = repo.runGit('commit -m "first"', stub.envOverrides);
+
+      expect(fs.existsSync(stub.marker)).toBe(true);
+      expect(commit.exitCode).not.toBe(0);
+      expect(repo.runGit('rev-parse HEAD').stdout.trim()).toBe(headBefore);
+    }, 30000);
+
+    test('install --no-fail writes no --no-fail into the pre-commit hook', () => {
+      setupRepoForInstall(repo, 'package-json');
+
+      const result = repo.runCli(
+        'install --silent --non-interactive --no-fail',
+      );
+      expect(result.exitCode).toBe(0);
+
+      const hook = repo.readHuskyHook('pre-commit');
+      expect(hook).toContain('--pre-commit');
+      expect(hook).not.toContain('--no-fail');
     }, 30000);
   });
 

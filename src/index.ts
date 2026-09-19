@@ -294,10 +294,13 @@ async function preCommitHandler(
 
   // Write dynamicVersion into BOTH the git index and the working-tree
   // package.json, surgically (version-manager-70i.3, D9).
-  const success = writePreCommitVersion(versionData.dynamicVersion);
-  if (!success) {
-    throw new Error('Failed to update package.json version');
-  }
+  //
+  // This THROWS on any failure (version-manager-70i.4, D10) and nothing here
+  // catches it: the hook exits non-zero and the commit is aborted, naming the
+  // operation that failed. The alternative — carrying on — records a commit
+  // whose package.json version is not the one that was computed, and every
+  // later computation counts from that wrong anchor with nothing red anywhere.
+  writePreCommitVersion(versionData.dynamicVersion);
 
   // NOTHING IS STAGED HERE, and no package manager runs (70i.5, 70i.3).
   //
@@ -694,6 +697,28 @@ async function watchCommand(
   });
 }
 
+/**
+ * The exit code to use when a command has failed.
+ *
+ * `--no-fail` normally means "a version-generation hiccup must not break the
+ * thing that invoked us": a post-checkout hook, a build step, an npm
+ * lifecycle script. In the PRE-COMMIT path it would mean something entirely
+ * different — commit anyway, with a package.json version that is not the one
+ * that was computed — so it is ignored there (version-manager-70i.4, D10).
+ *
+ * This reads process.argv rather than the parsed yargs options because it
+ * also runs for failures thrown before or during parsing.
+ *
+ * @returns 0 only when the caller asked to ignore failures and this is not a
+ *   pre-commit run; 1 otherwise
+ */
+function failureExitCode(): 0 | 1 {
+  const isPreCommit = process.argv.includes('--pre-commit');
+  const hasNoFail = process.argv.includes('--no-fail');
+
+  return hasNoFail && !isPreCommit ? 0 : 1;
+}
+
 async function main() {
   try {
     await yargs(hideBin(process.argv))
@@ -911,6 +936,25 @@ async function main() {
   --silent    No output (for scripts/hooks)`,
       )
       .strict()
+      // Own the failure path (version-manager-70i.4, D10). yargs' default
+      // prints the entire usage screen followed by a raw stack trace and
+      // exits 1 itself — so a pre-commit hook that aborts a commit buries the
+      // one line the author needs under seventy lines of help text, and the
+      // --no-fail decision below never ran at all.
+      .fail((msg: string | null, err: Error | null, yargsInstance) => {
+        if (err !== null && err !== undefined) {
+          // A command failed. The message is the whole story; the usage
+          // screen is noise.
+          console.error('❌ Failed:', err.message);
+        } else {
+          // A usage or validation problem (unknown flag, bad argument),
+          // where the help screen IS the useful answer.
+          yargsInstance.showHelp();
+          console.error(`\n❌ ${msg ?? 'Invalid arguments'}`);
+        }
+
+        process.exit(failureExitCode());
+      })
       .parseAsync();
 
     process.exit(0);
@@ -921,9 +965,7 @@ async function main() {
       console.error('❌ Failed:', error);
     }
 
-    // Check if noFail flag was set
-    const hasNoFail = process.argv.includes('--no-fail');
-    process.exit(hasNoFail ? 0 : 1);
+    process.exit(failureExitCode());
   }
 }
 
@@ -931,7 +973,6 @@ async function main() {
 if (require.main === module) {
   main().catch((error) => {
     console.error('Unexpected error:', error);
-    const hasNoFail = process.argv.includes('--no-fail');
-    process.exit(hasNoFail ? 0 : 1);
+    process.exit(failureExitCode());
   });
 }
