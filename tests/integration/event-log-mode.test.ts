@@ -293,6 +293,39 @@ describe('event-log mode (version-manager-cza)', () => {
     );
 
     test(
+      'a log that exists but was never staged is added to the commit, and said so',
+      () => {
+        // The state a repository is in between `install` and the first
+        // `git add`. The hook takes its other index path here — adding an
+        // entry rather than rewriting one — so it is exercised deliberately
+        // instead of only by whoever hits it first in real life.
+        setupEventLogModeRepo(repo, '0.1.0', 'add-to-patch');
+        activateHooks(repo);
+
+        repo.runGit(`rm --cached ${VERSION_LOG_FILENAME}`);
+        repo.runGit('commit --no-verify -m "untrack the log"');
+        expect(repo.runGit(`ls-files -- ${VERSION_LOG_FILENAME}`).stdout).toBe(
+          '',
+        );
+
+        // Stage ONLY the author's file. `git add .` would stage the log too
+        // and this test would silently measure the ordinary path instead —
+        // which is exactly what it did until the negative control caught it.
+        repo.writeFile('a.txt', 'a\n');
+        repo.runGit('add a.txt');
+        repo.makeCommit('a', false);
+
+        // The log is in the commit, with the event in it.
+        expect(
+          repo.runGit(`show HEAD:${VERSION_LOG_FILENAME}`).stdout,
+        ).toContain('"e":"commit"');
+        expect(commitEvents(repo)).toHaveLength(1);
+        expect(repo.runGit('status --porcelain').stdout.trim()).toBe('');
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
       'each commit event records the branch it happened on',
       () => {
         setupEventLogModeRepo(repo, '0.1.0', 'add-to-patch');
