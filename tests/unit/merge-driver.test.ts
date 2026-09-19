@@ -8,6 +8,7 @@ import {
   MERGE_DRIVER_NAME,
   runMergeDriver,
 } from '../../src/merge-driver';
+import {VersionManagerConfigSchema} from '../../src/types';
 
 /**
  * Unit tests for the merge driver's own decision-making (70i.8).
@@ -205,5 +206,50 @@ describe('the registration constants', () => {
     expect(MERGE_DRIVER_ATTRIBUTE).toBe(
       `package.json merge=${MERGE_DRIVER_NAME}`,
     );
+  });
+});
+
+/**
+ * The knob's schema half (version-manager-70i.24). The gate in installCommand
+ * is only as good as the value it reads, and the config schema is .strict():
+ * an undeclared `mergeDriver` field would make every config carrying the knob
+ * fail to parse, which readVersionManagerConfig() reports as "no config" —
+ * so the knob would silently do nothing at all.
+ */
+describe('the mergeDriver config knob', () => {
+  const baseConfig = {versionCalculationMode: 'add-to-patch'} as const;
+
+  test('a config omitting mergeDriver parses, and the knob defaults to OFF', () => {
+    const parsed = VersionManagerConfigSchema.parse({...baseConfig});
+
+    expect(parsed.mergeDriver).toEqual({enabled: false});
+  });
+
+  test('a config carrying mergeDriver parses and keeps the value', () => {
+    const parsed = VersionManagerConfigSchema.parse({
+      ...baseConfig,
+      mergeDriver: {enabled: true},
+      versionMode: 'package-json',
+    });
+
+    expect(parsed.mergeDriver.enabled).toBe(true);
+  });
+
+  test('an empty mergeDriver object parses, and still defaults to OFF', () => {
+    const parsed = VersionManagerConfigSchema.parse({
+      ...baseConfig,
+      mergeDriver: {},
+    });
+
+    expect(parsed.mergeDriver.enabled).toBe(false);
+  });
+
+  test('a non-boolean enabled is rejected rather than coerced to on', () => {
+    const result = VersionManagerConfigSchema.safeParse({
+      ...baseConfig,
+      mergeDriver: {enabled: 'yes'},
+    });
+
+    expect(result.success).toBe(false);
   });
 });

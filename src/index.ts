@@ -40,6 +40,7 @@ import {
   generateFileBasedVersion,
   generatePreCommitVersionData,
   getVersionMode,
+  isMergeDriverEnabled,
 } from './version-generator';
 import {startWatcher} from './watcher';
 
@@ -406,15 +407,29 @@ async function installCommand(
 
   installGitHooks(incrementPatch, silent, noFail, versionMode);
 
-  // The merge driver belongs to package-json mode only (version-manager-70i.8,
-  // D11). That mode rewrites the version on every commit, so two branches that
-  // both commit ALWAYS conflict on that line; dynamic-file mode changes
-  // package.json's version only when someone bumps it deliberately, and
-  // silently picking a side of a deliberate bump is not something to install
-  // on anyone's behalf. A failure here is not caught: an install that reports
-  // success while the driver is not registered would send the author looking
-  // at git the next time a merge conflicts.
-  if (versionMode === 'package-json') {
+  // The merge driver needs BOTH conditions, and neither is redundant
+  // (version-manager-70i.8 D11, version-manager-70i.24).
+  //
+  // package-json mode, because only that mode rewrites the version on every
+  // commit, so only there do two branches that both commit ALWAYS conflict on
+  // that line. dynamic-file mode changes package.json's version when someone
+  // bumps it deliberately, and silently picking a side of a deliberate bump is
+  // not something to install on anyone's behalf.
+  //
+  // mergeDriver.enabled, because registering the driver is what exposes a repo
+  // to version-manager-70i.22: when the registered COMMAND cannot run — `npx`
+  // with no node_modules, which is exactly what `git worktree add` produces
+  // while sharing .git/config — git reports a conflict but leaves package.json
+  // as ours with NO conflict markers, and `git add`ing it discards the other
+  // side. Off by default makes that a considered opt-in rather than an ambush.
+  //
+  // When the knob is off, install says NOTHING about merge drivers: an install
+  // that advertises a feature nobody asked for is noise.
+  //
+  // A failure here is not caught: an install that reports success while the
+  // driver is not registered would send the author looking at git the next
+  // time a merge conflicts.
+  if (versionMode === 'package-json' && isMergeDriverEnabled()) {
     const registration = registerMergeDriver(detectRunCommand(silent));
 
     if (registration.gitAttributes === 'claimed-by-another') {

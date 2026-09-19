@@ -31,11 +31,24 @@ export const BranchSuffixConfigSchema = z
   })
   .default({enabled: false, mainBranches: ['main', 'master']});
 
+// package.json merge-driver knob. Off by default (version-manager-70i.24):
+// registering the driver is what exposes a repository to the measured hazard
+// in version-manager-70i.22 — a driver COMMAND that cannot run turns a merge
+// into a conflict with no markers in it, which an author can stage away,
+// silently discarding the other side. The code ships; the feature is opted
+// into. See src/merge-driver.ts and the README.
+export const MergeDriverConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+  })
+  .default({enabled: false});
+
 // Current schema - does not accept runtimeVersion
 // Use .strict() to reject unknown fields like runtimeVersion
 export const VersionManagerConfigSchema = z
   .object({
     branchSuffix: BranchSuffixConfigSchema,
+    mergeDriver: MergeDriverConfigSchema,
     outputFormat: OutputFormatSchema.optional(),
     versionCalculationMode: VersionCalculationModeSchema,
     versionMode: VersionModeSchema.optional().default('dynamic-file'),
@@ -65,6 +78,7 @@ export type VersionCalculationMode = z.infer<
 >;
 export type VersionMode = z.infer<typeof VersionModeSchema>;
 export type BranchSuffixConfig = z.infer<typeof BranchSuffixConfigSchema>;
+export type MergeDriverConfig = z.infer<typeof MergeDriverConfigSchema>;
 export type LegacyVersionManagerConfig = z.infer<
   typeof LegacyVersionManagerConfigSchema
 >;

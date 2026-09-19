@@ -50,6 +50,7 @@ function migrateLegacyConfig(
 
   return {
     branchSuffix: {enabled: false, mainBranches: ['main', 'master']},
+    mergeDriver: {enabled: false},
     versionCalculationMode: legacyConfig.versionCalculationMode,
     versionMode: 'dynamic-file',
     versions,
@@ -174,6 +175,7 @@ function validateVersionNames(versions: Record<string, unknown>): void {
 function getDefaultVersionManagerConfig(): VersionManagerConfig {
   return {
     branchSuffix: {enabled: false, mainBranches: ['main', 'master']},
+    mergeDriver: {enabled: false},
     versionCalculationMode: 'append-commits',
     versionMode: 'dynamic-file',
     versions: {},
@@ -672,6 +674,20 @@ export function getVersionMode(): VersionMode {
   const configPath = join(process.cwd(), 'version-manager.json');
   const {config} = readVersionManagerConfig(configPath);
   return config?.versionMode ?? 'dynamic-file';
+}
+
+/**
+ * Read the merge-driver knob from version-manager.json (70i.24).
+ *
+ * OFF unless the config says otherwise — including when there is no config at
+ * all and when the config could not be parsed. That direction is deliberate:
+ * registering the driver is what creates the 70i.22 hazard, so an unreadable
+ * config must never be the reason a repository ends up with one.
+ */
+export function isMergeDriverEnabled(): boolean {
+  const configPath = join(process.cwd(), 'version-manager.json');
+  const {config} = readVersionManagerConfig(configPath);
+  return config?.mergeDriver.enabled ?? false;
 }
 
 /**

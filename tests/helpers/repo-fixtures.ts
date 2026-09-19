@@ -19,6 +19,18 @@ export interface BranchSuffixFixtureConfig {
 }
 
 /**
+ * The mergeDriver block to write into a fixture's version-manager.json.
+ *
+ * Omit it and the fixture writes no `mergeDriver` key at all, which is the
+ * state every real project starts in: the knob is off, and install registers
+ * no merge driver (version-manager-70i.24). Tests that want the driver must
+ * ask for it, exactly as a user does.
+ */
+export interface MergeDriverFixtureConfig {
+  enabled: boolean;
+}
+
+/**
  * Set up a repo in the default `versionMode: 'dynamic-file'`, with package.json
  * and version-manager.json committed and no git hooks installed. The CLI is
  * invoked explicitly by the test, which is how dynamic-file mode is exercised
@@ -183,6 +195,7 @@ export function setupPackageJsonModeRepo(
   packageVersion = '0.1.0',
   versionCalculationMode: 'add-to-patch' | 'append-commits' = 'add-to-patch',
   branchSuffix?: BranchSuffixFixtureConfig,
+  mergeDriver?: MergeDriverFixtureConfig,
 ): void {
   repo.initGit();
   repo.writeFile('README.md', '# Test Repo\n');
@@ -206,6 +219,7 @@ export function setupPackageJsonModeRepo(
     JSON.stringify(
       {
         ...(branchSuffix === undefined ? {} : {branchSuffix}),
+        ...(mergeDriver === undefined ? {} : {mergeDriver}),
         versionCalculationMode,
         versionMode: 'package-json',
         versions: {},
@@ -247,6 +261,7 @@ export function setupRepoForInstall(
   repo: TestRepo,
   versionMode: 'dynamic-file' | 'package-json',
   packageVersion = '0.1.0',
+  mergeDriver?: MergeDriverFixtureConfig,
 ): void {
   repo.initGit();
   repo.writeFile('README.md', '# Test Repo\n');
@@ -268,7 +283,12 @@ export function setupRepoForInstall(
   repo.writeFile(
     'version-manager.json',
     JSON.stringify(
-      {versionCalculationMode: 'add-to-patch', versionMode, versions: {}},
+      {
+        ...(mergeDriver === undefined ? {} : {mergeDriver}),
+        versionCalculationMode: 'add-to-patch',
+        versionMode,
+        versions: {},
+      },
       null,
       2,
     ) + '\n',
@@ -317,9 +337,11 @@ export function activateHooks(repo: TestRepo): void {
     fs.chmodSync(path.join(repo.getPath(), '.husky', hookName), 0o755);
   }
 
-  // In package-json mode install also registers the merge driver
-  // (version-manager-70i.8). Its git config value carries the same
-  // unresolvable npx prefix the hooks do, so it gets the same rewrite.
+  // In package-json mode WITH mergeDriver.enabled on, install also registers
+  // the merge driver (version-manager-70i.8, gated by version-manager-70i.24).
+  // Its git config value carries the same unresolvable npx prefix the hooks
+  // do, so it gets the same rewrite. With the knob off there is nothing
+  // configured and this is a no-op, which is the default fixture's state.
   const configuredDriver = repo
     .runGit('config --get merge.version-manager.driver')
     .stdout.trim();

@@ -22,6 +22,21 @@ import {TestRepo} from '../helpers/test-repo';
 /** Real git merges plus a CLI subprocess per hooked commit; not fast. */
 const TEST_TIMEOUT_MS = 60000;
 
+/**
+ * Build a repo that has the driver: package-json mode, the knob ON, hooks
+ * installed and rewritten to run this source tree.
+ *
+ * The knob is explicit here because it is off by default
+ * (version-manager-70i.24) — without it install registers nothing and every
+ * test below would measure git's built-in merge instead of the driver.
+ */
+function setupRepoWithDriver(repo: TestRepo): void {
+  setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch', undefined, {
+    enabled: true,
+  });
+  activateHooks(repo);
+}
+
 /** The version recorded in a given ref's package.json. */
 function versionAt(repo: TestRepo, ref: string): string {
   return (
@@ -157,8 +172,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'AC1: a true merge of a diverged branch does not conflict, and keeps OUR version',
       () => {
-        setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
-        activateHooks(repo);
+        setupRepoWithDriver(repo);
         const {feature, main} = divergeBranches(repo);
 
         const merge = repo.runGit('merge --no-ff feature -m "merge feature"');
@@ -179,8 +193,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'AC2: a squash merge does not conflict, and follows the same ours policy',
       () => {
-        setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
-        activateHooks(repo);
+        setupRepoWithDriver(repo);
         const {feature, main} = divergeBranches(repo);
 
         const merge = repo.runGit('merge --squash feature');
@@ -204,8 +217,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'AC3: a genuine conflict elsewhere in package.json STILL conflicts',
       () => {
-        setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
-        activateHooks(repo);
+        setupRepoWithDriver(repo);
 
         const mainBranch = repo
           .runGit('rev-parse --abbrev-ref HEAD')
@@ -255,8 +267,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'AC4: non-conflicting changes on both sides both survive',
       () => {
-        setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
-        activateHooks(repo);
+        setupRepoWithDriver(repo);
 
         const mainBranch = repo
           .runGit('rev-parse --abbrev-ref HEAD')
@@ -316,8 +327,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'the same merge conflicts on package.json when the driver is not registered',
       () => {
-        setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
-        activateHooks(repo);
+        setupRepoWithDriver(repo);
         unregisterMergeDriver(repo);
         const {feature, main} = divergeBranches(repo);
 
@@ -342,8 +352,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'a squash merge also conflicts again once the driver is gone',
       () => {
-        setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
-        activateHooks(repo);
+        setupRepoWithDriver(repo);
         unregisterMergeDriver(repo);
         divergeBranches(repo);
 
@@ -358,8 +367,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'a driver command that cannot RUN leaves a conflict with no markers (known trap)',
       () => {
-        setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
-        activateHooks(repo);
+        setupRepoWithDriver(repo);
 
         // `false` stands in for the real way this happens: the registered
         // command is `npx @justinhaaheim/version-manager ...`, and a fresh
@@ -401,8 +409,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'a HALF-registered driver aborts the merge — which is why install writes the driver first',
       () => {
-        setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
-        activateHooks(repo);
+        setupRepoWithDriver(repo);
 
         // git's own behaviour, measured 2026-09-19: a named driver with no
         // command line is fatal (exit 128) and the merge never starts, where
@@ -429,7 +436,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'two installs leave one .gitattributes entry and one git config entry',
       () => {
-        setupRepoForInstall(repo, 'package-json', '0.1.0');
+        setupRepoForInstall(repo, 'package-json', '0.1.0', {enabled: true});
         // An unrelated line that must survive untouched.
         repo.writeFile('.gitattributes', '*.png binary\n');
 
@@ -467,7 +474,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'install creates .gitattributes when the repo has none',
       () => {
-        setupRepoForInstall(repo, 'package-json', '0.1.0');
+        setupRepoForInstall(repo, 'package-json', '0.1.0', {enabled: true});
 
         expect(repo.fileExists('.gitattributes')).toBe(false);
         expect(repo.runCli('install --silent --non-interactive').exitCode).toBe(
@@ -484,7 +491,7 @@ describe('package.json merge driver (70i.8)', () => {
     test(
       'a package.json line claimed by ANOTHER merge driver is left alone',
       () => {
-        setupRepoForInstall(repo, 'package-json', '0.1.0');
+        setupRepoForInstall(repo, 'package-json', '0.1.0', {enabled: true});
         repo.writeFile('.gitattributes', 'package.json merge=someone-else\n');
 
         const result = repo.runCli('install --silent --non-interactive');
@@ -518,6 +525,104 @@ describe('package.json merge driver (70i.8)', () => {
             .runGit('config --get merge.version-manager.driver')
             .stdout.trim(),
         ).toBe('');
+      },
+      TEST_TIMEOUT_MS,
+    );
+  });
+
+  /**
+   * The knob itself (version-manager-70i.24).
+   *
+   * Registration needs package-json mode AND mergeDriver.enabled, because
+   * registering the driver is what exposes a repo to the 70i.22 trap: a
+   * driver command that cannot run leaves a conflict with no markers in it.
+   * The code is merged; the feature is opted into.
+   *
+   * The four tests above under AC5, and every merge test in this file, are
+   * the knob-ON half of this contract — they all now write
+   * `mergeDriver: {enabled: true}` into the fixture's version-manager.json,
+   * and assert that both halves get registered.
+   */
+  describe('the mergeDriver knob (70i.24)', () => {
+    /** Everything install could possibly say about the merge driver. */
+    function mentionsMergeDriver(text: string): boolean {
+      return (
+        /merge[ -]?driver/i.test(text) ||
+        text.includes('merge=version-manager') ||
+        text.includes('.gitattributes')
+      );
+    }
+
+    test(
+      'DEFAULT OFF: package-json mode with no mergeDriver field registers nothing and says nothing',
+      () => {
+        // No fourth argument: version-manager.json carries no mergeDriver key
+        // at all, which is what every existing project's config looks like.
+        setupRepoForInstall(repo, 'package-json', '0.1.0');
+
+        // NOT --silent: the point is that a user watching the install scroll
+        // by is never told about a feature they did not ask for.
+        const result = repo.runCli('install --non-interactive');
+
+        expect(result.exitCode).toBe(0);
+        expect(repo.fileExists('.gitattributes')).toBe(false);
+        expect(
+          repo
+            .runGit('config --get merge.version-manager.driver')
+            .stdout.trim(),
+        ).toBe('');
+        expect(
+          repo.runGit('config --get merge.version-manager.name').stdout.trim(),
+        ).toBe('');
+        expect(mentionsMergeDriver(result.stdout)).toBe(false);
+        expect(mentionsMergeDriver(result.stderr)).toBe(false);
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      'KNOB ON: package-json mode with mergeDriver.enabled registers both halves',
+      () => {
+        setupRepoForInstall(repo, 'package-json', '0.1.0', {enabled: true});
+
+        const result = repo.runCli('install --non-interactive');
+
+        expect(result.exitCode).toBe(0);
+        expect(repo.readFile('.gitattributes')).toContain(
+          'package.json merge=version-manager',
+        );
+        expect(
+          repo
+            .runGit('config --get merge.version-manager.driver')
+            .stdout.trim(),
+        ).toContain('merge-driver %O %A %B');
+        expect(
+          repo.runGit('config --get merge.version-manager.name').stdout.trim(),
+        ).not.toBe('');
+        // And it is the knob being on that makes install talk about it.
+        expect(mentionsMergeDriver(result.stdout)).toBe(true);
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      'BOTH CONDITIONS: the knob on in dynamic-file mode still registers nothing',
+      () => {
+        setupRepoForInstall(repo, 'dynamic-file', '0.1.0', {enabled: true});
+
+        const result = repo.runCli('install --non-interactive');
+
+        expect(result.exitCode).toBe(0);
+        // The mode veto is independent of the knob: dynamic-file changes
+        // package.json's version only on a deliberate bump, and no knob asks
+        // us to pick a side of one of those.
+        expect(repo.fileExists('.gitattributes')).toBe(false);
+        expect(
+          repo
+            .runGit('config --get merge.version-manager.driver')
+            .stdout.trim(),
+        ).toBe('');
+        expect(mentionsMergeDriver(result.stdout)).toBe(false);
       },
       TEST_TIMEOUT_MS,
     );

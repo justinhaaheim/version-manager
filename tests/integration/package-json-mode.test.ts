@@ -372,15 +372,21 @@ describe('package-json version mode', () => {
       // that silently undercounts. The suffix does not reduce conflicts —
       // it converts a wrong answer into a stopped merge.
       //
-      // THE MERGE DRIVER IS REMOVED HERE ON PURPOSE (70i.8). Install now
-      // registers a driver that resolves precisely this conflict by taking
-      // ours, which is D11's deliberate policy — so without this line the
-      // test would measure the driver instead of the suffix. The with-driver
-      // outcome is asserted at the bottom of this test and in
-      // tests/integration/merge-driver.test.ts.
-      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch', {
-        enabled: true,
-      });
+      // THE MERGE DRIVER IS ASKED FOR AND THEN REMOVED HERE ON PURPOSE
+      // (70i.8, 70i.24). The fixture opts the knob on, so install registers a
+      // driver that resolves precisely this conflict by taking ours (D11) —
+      // and the config half is then removed so the first half of the test
+      // measures the SUFFIX rather than the driver. Removing the config while
+      // keeping the committed .gitattributes is the real fresh-clone state,
+      // and the driver is put back at the bottom of this test, which is where
+      // the 70i.10 x 70i.8 interaction is pinned.
+      setupPackageJsonModeRepo(
+        repo,
+        '0.1.0',
+        'add-to-patch',
+        {enabled: true},
+        {enabled: true},
+      );
       activateHooks(repo);
       repo.runGit('config --remove-section merge.version-manager');
 
@@ -437,12 +443,15 @@ describe('package-json version mode', () => {
       // not apply .gitattributes merge drivers, so this is still what a PR
       // looks like even with the driver installed (70i.8).
       //
-      // The driver is removed so this measures git's own behaviour; the
-      // with-driver outcome for the same shape is AC1 in
+      // No merge driver is involved: the mergeDriver knob is off by default
+      // (70i.24), so install registers nothing and this measures git's own
+      // behaviour. The with-driver outcome for the same shape is AC1 in
       // tests/integration/merge-driver.test.ts.
       setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
       activateHooks(repo);
-      repo.runGit('config --remove-section merge.version-manager');
+      expect(
+        repo.runGit('config --get merge.version-manager.driver').stdout.trim(),
+      ).toBe('');
 
       const base = repo.runGit('rev-parse --abbrev-ref HEAD').stdout.trim();
 
