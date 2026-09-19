@@ -153,6 +153,54 @@ export async function countCommitsBetween(
 }
 
 /**
+ * Refs we are willing to interpolate into a shell command. Deliberately
+ * narrow: the ref comes from version-manager.json (branchSuffix.mainBranches),
+ * so it is user-authored text reaching a shell.
+ */
+const SAFE_REF_PATTERN = /^[A-Za-z0-9._/-]+$/;
+
+/**
+ * Count the commits on HEAD that are not reachable from `ref` — i.e. the
+ * commits this branch has of its own since its merge base with `ref`.
+ *
+ * @param ref - A branch name or other ref (e.g. "main")
+ * @returns The count, or null if the ref does not resolve, the ref is not a
+ *   shape we will pass to a shell, or git fails. NEVER 0 on failure: 0 is a
+ *   real answer meaning "this branch is identical to ref" (critical rule 6).
+ */
+export async function countCommitsSinceRef(
+  ref: string,
+): Promise<number | null> {
+  if (!SAFE_REF_PATTERN.test(ref)) {
+    return null;
+  }
+
+  try {
+    const output = await execCommand(`git rev-list --count ${ref}..HEAD`);
+    const count = parseInt(output, 10);
+    return isNaN(count) ? null : count;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Count every commit reachable from HEAD.
+ *
+ * @returns The count, or null if git fails (e.g. no commits yet). NEVER 0 on
+ *   failure (critical rule 6).
+ */
+export async function countCommitsOnHead(): Promise<number | null> {
+  try {
+    const output = await execCommand('git rev-list --count HEAD');
+    const count = parseInt(output, 10);
+    return isNaN(count) ? null : count;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read a field value from a JSON file at a specific commit
  * @param commit - Commit hash or ref
  * @param filePath - Path to the JSON file (relative to repo root)

@@ -23,7 +23,7 @@ import {
   readPackageJson,
   stageFiles,
   updateLockfile,
-  updatePackageVersion,
+  writePreCommitVersion,
 } from './script-manager';
 import {
   type BumpType,
@@ -227,9 +227,8 @@ async function generateVersionFile(
   // No prompt needed - just use defaults
 
   // Generate version info using file-based approach
-  const {versionData, configuredFormat} = await generateFileBasedVersion(
-    gitHook ? 'git-hook' : 'cli',
-  );
+  const {versionData, configuredFormat, branchSuffixWarning} =
+    await generateFileBasedVersion(gitHook ? 'git-hook' : 'cli');
 
   // Write to output file (finalOutputPath already calculated above for gitignore check)
   writeFileSync(finalOutputPath, JSON.stringify(versionData, null, 2) + '\n');
@@ -242,6 +241,11 @@ async function generateVersionFile(
 
   // Use CLI format if specified, otherwise fall back to config, otherwise 'compact'
   const effectiveFormat = format ?? configuredFormat ?? 'compact';
+
+  // A fallen-back or failed branch-suffix measurement must not be silent
+  if (branchSuffixWarning !== null && effectiveFormat !== 'silent') {
+    console.warn(branchSuffixWarning);
+  }
 
   // Format and display output based on format
   if (effectiveFormat !== 'silent') {
@@ -275,7 +279,7 @@ async function preCommitHandler(
   const silent = format === 'silent';
 
   // Generate version data with pre-commit calculation (+1 for the about-to-happen commit)
-  const {versionData, configuredFormat} =
+  const {versionData, configuredFormat, branchSuffixWarning} =
     await generatePreCommitVersionData('git-hook');
 
   // Write dynamic-version.local.json (same as always, for full metadata)
@@ -289,7 +293,7 @@ async function preCommitHandler(
   }
 
   // Mirror dynamicVersion to package.json
-  const success = updatePackageVersion(versionData.dynamicVersion);
+  const success = writePreCommitVersion(versionData.dynamicVersion);
   if (!success) {
     throw new Error('Failed to update package.json version');
   }
@@ -307,6 +311,12 @@ async function preCommitHandler(
 
   // Display output
   const effectiveFormat = format ?? configuredFormat ?? 'compact';
+
+  // A fallen-back or failed branch-suffix measurement must not be silent
+  if (branchSuffixWarning !== null && effectiveFormat !== 'silent') {
+    console.warn(branchSuffixWarning);
+  }
+
   if (effectiveFormat !== 'silent') {
     const dtsPath = generateTypes
       ? finalOutputPath.replace(/\.json$/, '.d.ts')

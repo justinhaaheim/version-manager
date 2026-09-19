@@ -11,14 +11,24 @@ import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
 import {
+  applyBranchSuffix,
+  type BranchCommitCounts,
+  type BranchSuffixDecision,
+  decideBranchSuffix,
+  isSuffixExemptBranch,
+  stripPrerelease,
+} from './branch-suffix';
+import {
   countCommitsBetween,
+  countCommitsOnHead,
+  countCommitsSinceRef,
   findLastCommitWhereFieldChanged,
   getCurrentBranch,
   getGitDescribe,
   isGitRepository,
   readFieldFromCommit,
 } from './git-utils';
-import {getPackageVersion} from './script-manager';
+import {getPackageVersion, readPreCommitBaseVersion} from './script-manager';
 import {
   LegacyVersionManagerConfigSchema,
   VersionManagerConfigSchema,
@@ -38,6 +48,7 @@ function migrateLegacyConfig(
   versions.runtime = legacyConfig.runtimeVersion;
 
   return {
+    branchSuffix: {enabled: false, mainBranches: ['main', 'master']},
     versionCalculationMode: legacyConfig.versionCalculationMode,
     versionMode: 'dynamic-file',
     versions,
@@ -161,10 +172,86 @@ function validateVersionNames(versions: Record<string, unknown>): void {
  */
 function getDefaultVersionManagerConfig(): VersionManagerConfig {
   return {
+    branchSuffix: {enabled: false, mainBranches: ['main', 'master']},
     versionCalculationMode: 'append-commits',
     versionMode: 'dynamic-file',
     versions: {},
   };
+}
+
+/**
+ * Take the two commit measurements the branch suffix needs (D5).
+ *
+ * Both are taken up front rather than lazily so that a null can only ever
+ * mean "this measurement failed", never "we did not look" (critical rule 6).
+ *
+ * @param mainBranches - Configured main branches, tried in order
+ * @returns Grouped counts; each field is null only when its git command failed
+ */
+async function measureBranchCommitCounts(
+  mainBranches: string[],
+): Promise<BranchCommitCounts> {
+  let mergeBase: {count: number; ref: string} | null = null;
+
+  for (const ref of mainBranches) {
+    const count = await countCommitsSinceRef(ref);
+    if (count !== null) {
+      mergeBase = {count, ref};
+      break;
+    }
+  }
+
+  return {mergeBase, total: await countCommitsOnHead()};
+}
+
+/**
+ * Work out whether this version should carry a branch suffix, performing the
+ * git measurements only when the knob is on and the branch is eligible.
+ *
+ * @param config - Parsed version-manager.json
+ * @param branch - Current branch name ("HEAD" when detached)
+ * @param extraCommits - 1 in the pre-commit path (the about-to-happen commit), else 0
+ */
+async function planBranchSuffix(
+  config: VersionManagerConfig,
+  branch: string,
+  extraCommits: number,
+): Promise<BranchSuffixDecision> {
+  const {enabled, mainBranches} = config.branchSuffix;
+
+  if (!enabled || isSuffixExemptBranch(branch, mainBranches)) {
+    return {decoration: null, warning: null};
+  }
+
+  return decideBranchSuffix({
+    branch,
+    counts: await measureBranchCommitCounts(mainBranches),
+    enabled,
+    extraCommits,
+    mainBranches,
+  });
+}
+
+/**
+ * Apply a suffix decision to a computed version.
+ *
+ * @param version - The version as computed by the normal calculation
+ * @param decision - The outcome of planBranchSuffix()
+ * @returns The decorated version, or the input unchanged when no suffix applies
+ */
+function decorateVersion(
+  version: string,
+  decision: BranchSuffixDecision,
+): string {
+  if (decision.decoration === null) {
+    return version;
+  }
+
+  return applyBranchSuffix(
+    version,
+    decision.decoration.sanitisedBranch,
+    decision.decoration.n,
+  );
 }
 
 /**
@@ -226,6 +313,13 @@ function generateTimestamps(): {timestamp: string; timestampUnix: number} {
  * Result from generateFileBasedVersion including config settings
  */
 export interface GenerateVersionResult {
+  /**
+   * Set when the branch-suffix commit count fell back to a different
+   * measurement, or could not be taken at all. null means either that the
+   * knob is off or that the measurement was clean — never that it was skipped
+   * silently.
+   */
+  branchSuffixWarning: string | null;
   /** Output format from config (if set) */
   configuredFormat: 'silent' | 'compact' | 'normal' | 'verbose' | undefined;
   /** The generated version data */
@@ -256,8 +350,8 @@ export async function generateFileBasedVersion(
   const dirty = gitDescribe.includes('-dirty');
 
   // Read base version from package.json
-  const baseVersion = getPackageVersion();
-  if (!baseVersion) {
+  const rawBaseVersion = getPackageVersion();
+  if (!rawBaseVersion) {
     throw new Error(
       'No version found in package.json. Please add a "version" field to your package.json.',
     );
@@ -282,6 +376,15 @@ export async function generateFileBasedVersion(
     console.log('   Moved runtimeVersion to versions.runtime');
   }
 
+  // D3: while the knob is on, version-manager owns the prerelease segment.
+  // Strip it before anything calculates with the version — calculateCodeVersion()
+  // returns its input unchanged on a 4-part split, so an un-stripped decorated
+  // version would freeze silently rather than fail.
+  const ownsPrerelease = config.branchSuffix.enabled;
+  const baseVersion = ownsPrerelease
+    ? stripPrerelease(rawBaseVersion)
+    : rawBaseVersion;
+
   // Find last commit where package.json version changed
   const lastCommit = await findLastCommitWhereFieldChanged(
     'package.json',
@@ -296,11 +399,15 @@ export async function generateFileBasedVersion(
   // Check if version has changed in working tree (uncommitted)
   // If current version differs from last committed version, treat as 0 commits
   if (lastCommit) {
-    const committedVersion = await readFieldFromCommit(
+    const rawCommittedVersion = await readFieldFromCommit(
       lastCommit,
       'package.json',
       'version',
     );
+    const committedVersion =
+      rawCommittedVersion !== null && ownsPrerelease
+        ? stripPrerelease(rawCommittedVersion)
+        : rawCommittedVersion;
 
     if (committedVersion && committedVersion !== baseVersion) {
       // Version changed in working tree (uncommitted bump)
@@ -310,11 +417,15 @@ export async function generateFileBasedVersion(
   }
 
   // Calculate dynamic version
-  const dynamicVersion = calculateCodeVersion(
+  const calculatedVersion = calculateCodeVersion(
     baseVersion,
     commitsSince,
     config.versionCalculationMode,
   );
+
+  // D8: the branch suffix applies in both version modes, through this one path.
+  const suffixDecision = await planBranchSuffix(config, branch, 0);
+  const dynamicVersion = decorateVersion(calculatedVersion, suffixDecision);
 
   // Generate timestamps
   const timestamps = generateTimestamps();
@@ -336,6 +447,7 @@ export async function generateFileBasedVersion(
   };
 
   return {
+    branchSuffixWarning: suffixDecision.warning,
     configuredFormat: config.outputFormat,
     versionData,
   };
@@ -442,9 +554,10 @@ export async function generatePreCommitVersionData(
   const gitDescribe = await getGitDescribe();
   const dirty = gitDescribe.includes('-dirty');
 
-  // Read current version from package.json
-  const currentVersion = getPackageVersion();
-  if (!currentVersion) {
+  // Read current version. Isolated behind a named helper so that 70i.3 can
+  // switch the source to the git index without touching anything below.
+  const rawCurrentVersion = readPreCommitBaseVersion();
+  if (!rawCurrentVersion) {
     throw new Error(
       'No version found in package.json. Please add a "version" field to your package.json.',
     );
@@ -475,12 +588,26 @@ export async function generatePreCommitVersionData(
     ? await countCommitsBetween(lastCommit, 'HEAD')
     : 0;
 
+  // D3: while the knob is on, version-manager owns the prerelease segment. In
+  // this mode the decorated version is COMMITTED into package.json and read
+  // back here as the next computation's input, so stripping it is what stops
+  // the suffix compounding (0.1.0-b.1 -> 0.1.0-b.1-b.2) or, worse, freezing
+  // the version entirely: calculatePreCommitVersion() returns its input
+  // unchanged when the split is not exactly three parts.
+  const currentVersion = config.branchSuffix.enabled
+    ? stripPrerelease(rawCurrentVersion)
+    : rawCurrentVersion;
+
   // Calculate the pre-commit version (accounts for the about-to-happen commit)
-  const dynamicVersion = calculatePreCommitVersion(
+  const calculatedVersion = calculatePreCommitVersion(
     currentVersion,
     commitsSinceLastChange,
     config.versionCalculationMode,
   );
+
+  // D5: +1 for the about-to-happen commit, which is not in any git count yet.
+  const suffixDecision = await planBranchSuffix(config, branch, 1);
+  const dynamicVersion = decorateVersion(calculatedVersion, suffixDecision);
 
   // For the base version in the output, strip any +N metadata
   const {base: baseVersion} = parseVersionMetadata(currentVersion);
@@ -504,6 +631,7 @@ export async function generatePreCommitVersionData(
   };
 
   return {
+    branchSuffixWarning: suffixDecision.warning,
     configuredFormat: config.outputFormat,
     versionData,
   };

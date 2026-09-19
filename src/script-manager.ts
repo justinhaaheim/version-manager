@@ -247,6 +247,33 @@ export function updatePackageVersion(newVersion: string): boolean {
 }
 
 /**
+ * Read the version the pre-commit calculation starts from.
+ *
+ * Isolated from the calculation on purpose: version-manager-70i.3 changes
+ * where this value comes from (the git INDEX, via `git show :package.json`,
+ * rather than the working tree) and should only have to replace this body.
+ *
+ * @returns The current version string, or null if package.json has none
+ */
+export function readPreCommitBaseVersion(): string | null {
+  return getPackageVersion();
+}
+
+/**
+ * Write the version computed for the commit that is about to happen.
+ *
+ * The counterpart to readPreCommitBaseVersion(): version-manager-70i.3
+ * replaces this body with a surgical index write (hash-object +
+ * update-index) plus a version-field-only rewrite of the working-tree file.
+ *
+ * @param newVersion - The version string to record
+ * @returns True if successful, false otherwise
+ */
+export function writePreCommitVersion(newVersion: string): boolean {
+  return updatePackageVersion(newVersion);
+}
+
+/**
  * Detect which package manager to use based on lock files.
  * Returns the lockfile path alongside the manager name.
  */

@@ -22,10 +22,20 @@ export const LegacyVersionManagerConfigSchema = z.object({
   versions: z.record(z.string(), z.string()).optional(),
 });
 
+// Branch-name suffix knob. Off by default: turning it on makes every branch
+// build carry a semver prerelease naming the branch (see src/branch-suffix.ts).
+export const BranchSuffixConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    mainBranches: z.array(z.string()).default(['main', 'master']),
+  })
+  .default({enabled: false, mainBranches: ['main', 'master']});
+
 // Current schema - does not accept runtimeVersion
 // Use .strict() to reject unknown fields like runtimeVersion
 export const VersionManagerConfigSchema = z
   .object({
+    branchSuffix: BranchSuffixConfigSchema,
     outputFormat: OutputFormatSchema.optional(),
     versionCalculationMode: VersionCalculationModeSchema,
     versionMode: VersionModeSchema.optional().default('dynamic-file'),
@@ -54,6 +64,7 @@ export type VersionCalculationMode = z.infer<
   typeof VersionCalculationModeSchema
 >;
 export type VersionMode = z.infer<typeof VersionModeSchema>;
+export type BranchSuffixConfig = z.infer<typeof BranchSuffixConfigSchema>;
 export type LegacyVersionManagerConfig = z.infer<
   typeof LegacyVersionManagerConfigSchema
 >;
