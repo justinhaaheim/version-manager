@@ -1,9 +1,12 @@
+import type {RefCommitCountFailure} from '../../src/git-utils';
+
 import {describe, expect, test} from 'bun:test';
 import semver from 'semver';
 
 import {
   applyBranchSuffix,
   decideBranchSuffix,
+  describeRefCountFailure,
   isSuffixExemptBranch,
   sanitizeBranchName,
   stripPrerelease,
@@ -227,6 +230,7 @@ describe('isSuffixExemptBranch', () => {
 describe('decideBranchSuffix', () => {
   const measured = (count: number, ref = 'main') => ({
     mergeBase: {count, ref},
+    mergeBaseFailures: [],
     total: count + 2,
   });
 
@@ -296,7 +300,11 @@ describe('decideBranchSuffix', () => {
   test('no main branch resolves: falls back to the total count, and says so (AC 9)', () => {
     const decision = decideBranchSuffix({
       branch: 'feat-x',
-      counts: {mergeBase: null, total: 9},
+      counts: {
+        mergeBase: null,
+        mergeBaseFailures: [{outcome: 'unresolved', ref: 'nope'}],
+        total: 9,
+      },
       enabled: true,
       extraCommits: 0,
       mainBranches: ['nope'],
@@ -309,7 +317,14 @@ describe('decideBranchSuffix', () => {
   test('no measurement at all: UNDECORATED version, never n = 0 (AC 9, rule 6)', () => {
     const decision = decideBranchSuffix({
       branch: 'feat-x',
-      counts: {mergeBase: null, total: null},
+      counts: {
+        mergeBase: null,
+        mergeBaseFailures: [
+          {outcome: 'unresolved', ref: 'main'},
+          {outcome: 'unresolved', ref: 'master'},
+        ],
+        total: null,
+      },
       enabled: true,
       extraCommits: 0,
       mainBranches: MAIN_BRANCHES,
@@ -324,7 +339,7 @@ describe('decideBranchSuffix', () => {
     // plausible-looking n === 1. It must stay undecorated instead.
     const decision = decideBranchSuffix({
       branch: 'feat-x',
-      counts: {mergeBase: null, total: null},
+      counts: {mergeBase: null, mergeBaseFailures: [], total: null},
       enabled: true,
       extraCommits: 1,
       mainBranches: MAIN_BRANCHES,
@@ -336,14 +351,18 @@ describe('decideBranchSuffix', () => {
   test('a real 0 and a failed measurement are distinguishable', () => {
     const measuredZero = decideBranchSuffix({
       branch: 'feat-x',
-      counts: {mergeBase: {count: 0, ref: 'main'}, total: 5},
+      counts: {
+        mergeBase: {count: 0, ref: 'main'},
+        mergeBaseFailures: [],
+        total: 5,
+      },
       enabled: true,
       extraCommits: 0,
       mainBranches: MAIN_BRANCHES,
     });
     const failed = decideBranchSuffix({
       branch: 'feat-x',
-      counts: {mergeBase: null, total: null},
+      counts: {mergeBase: null, mergeBaseFailures: [], total: null},
       enabled: true,
       extraCommits: 0,
       mainBranches: MAIN_BRANCHES,
@@ -353,5 +372,91 @@ describe('decideBranchSuffix', () => {
     expect(measuredZero.warning).toBeNull();
     expect(failed.decoration).toBeNull();
     expect(failed.warning).not.toBeNull();
+  });
+});
+
+describe('the warning names WHY a ref was unusable (F1)', () => {
+  const warningFor = (failures: RefCommitCountFailure[]): string => {
+    const decision = decideBranchSuffix({
+      branch: 'feat-x',
+      counts: {mergeBase: null, mergeBaseFailures: failures, total: 9},
+      enabled: true,
+      extraCommits: 0,
+      mainBranches: failures.map((failure) => failure.ref),
+    });
+
+    expect(decision.warning).not.toBeNull();
+    return decision.warning ?? '';
+  };
+
+  test('a ref that does not exist is reported as missing, not malformed', () => {
+    const warning = warningFor([{outcome: 'unresolved', ref: 'trunk'}]);
+
+    expect(warning).toContain('trunk: no such ref in this repository');
+    expect(warning).not.toContain('not a usable ref name');
+  });
+
+  test('a ref whose NAME was rejected says so, and is not blamed on resolution', () => {
+    // THE BUG F1 DESCRIBES: this used to be reported as "did not resolve",
+    // sending the author to look for a branch instead of at their spelling.
+    const warning = warningFor([
+      {outcome: 'rejected-name', ref: 'main branch'},
+    ]);
+
+    expect(warning).toContain('main branch: not a usable ref name');
+    expect(warning).not.toContain('no such ref');
+  });
+
+  test('a git failure carries git own words', () => {
+    const warning = warningFor([
+      {
+        detail: '`git rev-parse` failed (exit 128): not a git repository',
+        outcome: 'git-failed',
+        ref: 'main',
+      },
+    ]);
+
+    expect(warning).toContain('main: `git rev-parse` failed (exit 128)');
+    expect(warning).toContain('not a git repository');
+  });
+
+  test('mixed causes are each named', () => {
+    const warning = warningFor([
+      {outcome: 'rejected-name', ref: 'bad name'},
+      {outcome: 'unresolved', ref: 'master'},
+    ]);
+
+    expect(warning).toContain('bad name: not a usable ref name');
+    expect(warning).toContain('master: no such ref in this repository');
+  });
+
+  test('an empty mainBranches list says nothing was configured', () => {
+    const decision = decideBranchSuffix({
+      branch: 'feat-x',
+      counts: {mergeBase: null, mergeBaseFailures: [], total: 9},
+      enabled: true,
+      extraCommits: 0,
+      mainBranches: [],
+    });
+
+    expect(decision.warning).toContain('none are configured');
+  });
+});
+
+describe('describeRefCountFailure', () => {
+  test('each cause points somewhere different', () => {
+    expect(
+      describeRefCountFailure({outcome: 'rejected-name', ref: 'a b'}),
+    ).toContain('not a usable ref name');
+    expect(
+      describeRefCountFailure({outcome: 'unresolved', ref: 'nope'}),
+    ).toContain('no such ref');
+    expect(
+      describeRefCountFailure({
+        detail: 'boom',
+        outcome: 'git-failed',
+        ref: 'main',
+      }),
+    ).toBe('main: boom');
   });
 });

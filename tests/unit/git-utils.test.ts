@@ -1,6 +1,9 @@
 import {afterEach, beforeEach, describe, expect, test} from 'bun:test';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
-import {isFileTrackedByGit} from '../../src/git-utils';
+import {countCommitsSinceRef, isFileTrackedByGit} from '../../src/git-utils';
 import {TestRepo} from '../helpers/test-repo';
 
 /**
@@ -90,6 +93,102 @@ describe('Git Utils', () => {
         expect(result).toBe(true);
       } finally {
         process.chdir(originalCwd);
+      }
+    });
+  });
+
+  /**
+   * Finding F1: this used to return a bare null for all three failure causes,
+   * so the caller's warning could only ever blame one of them.
+   */
+  describe('countCommitsSinceRef', () => {
+    /** Run `body` with the process cwd inside `dir`, always restoring it. */
+    const inDirectory = async <T>(
+      dir: string,
+      body: () => Promise<T>,
+    ): Promise<T> => {
+      const originalCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        return await body();
+      } finally {
+        process.chdir(originalCwd);
+      }
+    };
+
+    test('counts the commits a branch has of its own', async () => {
+      repo.writeFile('a.txt', 'a\n');
+      repo.makeCommit('base');
+      const baseBranch = repo
+        .runGit('rev-parse --abbrev-ref HEAD')
+        .stdout.trim();
+      repo.createBranch('feat-x');
+      repo.writeFile('b.txt', 'b\n');
+      repo.makeCommit('one');
+      repo.writeFile('c.txt', 'c\n');
+      repo.makeCommit('two');
+
+      const result = await inDirectory(repo.getPath(), () =>
+        countCommitsSinceRef(baseBranch),
+      );
+
+      expect(result).toEqual({count: 2, outcome: 'counted', ref: baseBranch});
+    });
+
+    test('a branch identical to its base counts a REAL zero', async () => {
+      repo.writeFile('a.txt', 'a\n');
+      repo.makeCommit('base');
+      const baseBranch = repo
+        .runGit('rev-parse --abbrev-ref HEAD')
+        .stdout.trim();
+      repo.createBranch('feat-x');
+
+      const result = await inDirectory(repo.getPath(), () =>
+        countCommitsSinceRef(baseBranch),
+      );
+
+      // 0 is an answer here, and must be reported as one — not as a failure,
+      // and never the other way round (critical rule 6).
+      expect(result).toEqual({count: 0, outcome: 'counted', ref: baseBranch});
+    });
+
+    test('a ref that does not exist reports "unresolved"', async () => {
+      repo.writeFile('a.txt', 'a\n');
+      repo.makeCommit('base');
+
+      const result = await inDirectory(repo.getPath(), () =>
+        countCommitsSinceRef('no-such-branch'),
+      );
+
+      expect(result).toEqual({outcome: 'unresolved', ref: 'no-such-branch'});
+    });
+
+    test('a ref name we refuse to pass to git reports "rejected-name"', async () => {
+      repo.writeFile('a.txt', 'a\n');
+      repo.makeCommit('base');
+
+      const result = await inDirectory(repo.getPath(), () =>
+        countCommitsSinceRef('main branch'),
+      );
+
+      // Distinct from 'unresolved': the fix is in the config, not the repo.
+      expect(result).toEqual({outcome: 'rejected-name', ref: 'main branch'});
+    });
+
+    test('git failing reports "git-failed" and carries git own message', async () => {
+      const outsideRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-nogit-'));
+
+      try {
+        const result = await inDirectory(outsideRepo, () =>
+          countCommitsSinceRef('main'),
+        );
+
+        expect(result.outcome).toBe('git-failed');
+        if (result.outcome === 'git-failed') {
+          expect(result.detail).toContain('not a git repository');
+        }
+      } finally {
+        fs.rmSync(outsideRepo, {force: true, recursive: true});
       }
     });
   });

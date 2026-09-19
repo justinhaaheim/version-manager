@@ -27,6 +27,7 @@ import {
   getGitDescribe,
   isGitRepository,
   readFieldFromCommit,
+  type RefCommitCountFailure,
 } from './git-utils';
 import {getPackageVersion, readPreCommitBaseVersion} from './script-manager';
 import {
@@ -192,16 +193,22 @@ async function measureBranchCommitCounts(
   mainBranches: string[],
 ): Promise<BranchCommitCounts> {
   let mergeBase: {count: number; ref: string} | null = null;
+  const mergeBaseFailures: RefCommitCountFailure[] = [];
 
   for (const ref of mainBranches) {
-    const count = await countCommitsSinceRef(ref);
-    if (count !== null) {
-      mergeBase = {count, ref};
+    const result = await countCommitsSinceRef(ref);
+
+    if (result.outcome === 'counted') {
+      mergeBase = {count: result.count, ref: result.ref};
       break;
     }
+
+    // Keep WHY each ref was unusable, so the warning can name the cause
+    // instead of blaming resolution for all three of them (F1).
+    mergeBaseFailures.push(result);
   }
 
-  return {mergeBase, total: await countCommitsOnHead()};
+  return {mergeBase, mergeBaseFailures, total: await countCommitsOnHead()};
 }
 
 /**

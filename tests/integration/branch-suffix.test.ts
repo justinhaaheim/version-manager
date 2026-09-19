@@ -384,8 +384,39 @@ describe('branchSuffix knob', () => {
         expect(result.exitCode).toBe(0);
         // The fallback notice is a warning, so it goes to stderr.
         expect(result.stderr).toContain('none of the configured main branches');
+        // F1: and it names the cause. This ref is well-formed, it just is
+        // not in the repository.
+        expect(result.stderr).toContain(
+          'does-not-exist: no such ref in this repository',
+        );
 
         // The version is still produced, from the fallback count.
+        expect(readDynamicVersion(repo)).toBe('0.1.1-feat-x.3');
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      'a malformed main-branch NAME is reported as such, not as a missing branch (F1)',
+      () => {
+        setupDynamicFileModeRepo(repo, '0.1.0', 'add-to-patch', {
+          enabled: true,
+          // A space is outside the ref shape we hand to git. Before F1 this
+          // produced the same "did not resolve" wording as a branch that is
+          // genuinely absent, sending the author to look in the wrong place.
+          mainBranches: ['main branch'],
+        });
+
+        repo.runGit('checkout -b feat-x');
+        repo.writeFile('a.txt', 'a\n');
+        repo.makeCommit('add a');
+
+        const result = repo.runCli('');
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toContain('main branch: not a usable ref name');
+        expect(result.stderr).not.toContain('no such ref in this repository');
+
+        // Same fallback behaviour as before: the count is the total on HEAD.
         expect(readDynamicVersion(repo)).toBe('0.1.1-feat-x.3');
       },
       TEST_TIMEOUT_MS,

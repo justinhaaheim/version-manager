@@ -1,7 +1,8 @@
-import {exec, execFileSync} from 'child_process';
+import {exec, execFile, execFileSync} from 'child_process';
 import {promisify} from 'util';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Cap on the output of the index plumbing below. The default (1 MB) is enough
@@ -326,34 +327,160 @@ export async function countCommitsBetween(
 }
 
 /**
- * Refs we are willing to interpolate into a shell command. Deliberately
- * narrow: the ref comes from version-manager.json (branchSuffix.mainBranches),
- * so it is user-authored text reaching a shell.
+ * Refs we are willing to hand to git. Deliberately narrow: the ref comes from
+ * version-manager.json (branchSuffix.mainBranches), so it is user-authored
+ * text. The counting below is argv-based rather than shell-based, so this is
+ * no longer about shell metacharacters — it is about whitespace and leading
+ * dashes reaching git's own option parser as flags.
  */
 const SAFE_REF_PATTERN = /^[A-Za-z0-9._/-]+$/;
+
+/**
+ * Why a ref could not be counted. Three genuinely different facts, kept
+ * apart so the message a user reads names the one that actually happened
+ * (version-manager-70i.13 F1).
+ */
+export type RefCommitCountFailure =
+  | {
+      /** git's own stderr, or the reason git could not be run at all. */
+      detail: string;
+      outcome: 'git-failed';
+      ref: string;
+    }
+  | {outcome: 'rejected-name'; ref: string}
+  | {outcome: 'unresolved'; ref: string};
+
+/** The outcome of counting commits since a ref: one count, or one cause. */
+export type RefCommitCount =
+  | {count: number; outcome: 'counted'; ref: string}
+  | RefCommitCountFailure;
+
+/** One git invocation's result, with a non-zero exit treated as data. */
+interface GitAttempt {
+  exitCode: number;
+  stderr: string;
+  stdout: string;
+}
+
+/**
+ * Run `git <args>` without a shell, reporting a non-zero exit as data rather
+ * than as a throw — the callers below need the exit CODE to tell "this ref
+ * does not exist" (1) from "git failed" (128) apart.
+ *
+ * @param args - argv for git, passed through verbatim
+ * @returns The exit code and both streams
+ * @throws If git could not be executed at all, or died on a signal. Neither
+ *   is an exit code and must not be reported as one (critical rule 6).
+ */
+async function gitAttempt(args: string[]): Promise<GitAttempt> {
+  try {
+    const {stderr, stdout} = await execFileAsync('git', args, {
+      maxBuffer: GIT_MAX_BUFFER,
+    });
+    return {exitCode: 0, stderr, stdout};
+  } catch (error) {
+    const failure = error as {
+      code?: number | string;
+      stderr?: string;
+      stdout?: string;
+    };
+
+    if (typeof failure.code !== 'number') {
+      throw new Error(
+        `\`git ${args.join(' ')}\` could not be run: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    return {
+      exitCode: failure.code,
+      stderr: failure.stderr ?? '',
+      stdout: failure.stdout ?? '',
+    };
+  }
+}
+
+/** git's stderr if it said anything, else a bare description of the exit. */
+function gitFailureDetail(args: string[], attempt: GitAttempt): string {
+  const stderr = attempt.stderr.trim();
+  const printable = `git ${args.join(' ')}`;
+
+  return stderr === ''
+    ? `\`${printable}\` exited ${attempt.exitCode}`
+    : `\`${printable}\` failed (exit ${attempt.exitCode}): ${stderr}`;
+}
 
 /**
  * Count the commits on HEAD that are not reachable from `ref` — i.e. the
  * commits this branch has of its own since its merge base with `ref`.
  *
+ * Resolution is a separate step from counting on purpose: `rev-parse --verify
+ * --quiet` exits 1 with no output for a ref that does not exist and 128 when
+ * git itself fails, which is the only way to keep those two apart. Collapsing
+ * them (as this function used to, by returning a bare null for everything)
+ * made the caller's warning blame the wrong thing.
+ *
  * @param ref - A branch name or other ref (e.g. "main")
- * @returns The count, or null if the ref does not resolve, the ref is not a
- *   shape we will pass to a shell, or git fails. NEVER 0 on failure: 0 is a
+ * @returns A count, or the reason there is none. NEVER 0 on failure: 0 is a
  *   real answer meaning "this branch is identical to ref" (critical rule 6).
  */
 export async function countCommitsSinceRef(
   ref: string,
-): Promise<number | null> {
+): Promise<RefCommitCount> {
   if (!SAFE_REF_PATTERN.test(ref)) {
-    return null;
+    return {outcome: 'rejected-name', ref};
   }
 
   try {
-    const output = await execCommand(`git rev-list --count ${ref}..HEAD`);
-    const count = parseInt(output, 10);
-    return isNaN(count) ? null : count;
-  } catch {
-    return null;
+    const resolveArgs = ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`];
+    const resolved = await gitAttempt(resolveArgs);
+
+    if (resolved.exitCode === 1 && resolved.stdout.trim() === '') {
+      return {outcome: 'unresolved', ref};
+    }
+
+    if (resolved.exitCode !== 0) {
+      return {
+        detail: gitFailureDetail(resolveArgs, resolved),
+        outcome: 'git-failed',
+        ref,
+      };
+    }
+
+    const countArgs = ['rev-list', '--count', `${ref}..HEAD`];
+    const counted = await gitAttempt(countArgs);
+
+    if (counted.exitCode !== 0) {
+      return {
+        detail: gitFailureDetail(countArgs, counted),
+        outcome: 'git-failed',
+        ref,
+      };
+    }
+
+    const printed = counted.stdout.trim();
+    const count = parseInt(printed, 10);
+
+    if (isNaN(count)) {
+      return {
+        detail: `\`git ${countArgs.join(' ')}\` printed ${JSON.stringify(
+          printed,
+        )}, which is not a number`,
+        outcome: 'git-failed',
+        ref,
+      };
+    }
+
+    return {count, outcome: 'counted', ref};
+  } catch (error) {
+    // gitAttempt only throws when git could not be run at all. That is a
+    // failure with a name, not an absent measurement.
+    return {
+      detail: error instanceof Error ? error.message : String(error),
+      outcome: 'git-failed',
+      ref,
+    };
   }
 }
 

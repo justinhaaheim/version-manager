@@ -14,6 +14,8 @@
  * Everything in this module is a pure function. No file I/O, no git.
  */
 
+import type {RefCommitCountFailure} from './git-utils';
+
 /** Used when sanitisation leaves nothing behind (D4e). */
 export const FALLBACK_BRANCH_LABEL = 'branch';
 
@@ -127,8 +129,42 @@ export interface BranchCommitCounts {
    * resolved — never 0, which would be a real measurement.
    */
   mergeBase: {count: number; ref: string} | null;
+  /**
+   * Why each main branch tried before `mergeBase` was not usable, in the
+   * order they were tried (F1). Empty when the first ref counted, and also
+   * when no main branches are configured at all — `mergeBase === null` with
+   * an empty list is "there was nothing to try", which the warning says.
+   */
+  mergeBaseFailures: RefCommitCountFailure[];
   /** Total commits on HEAD. null means that measurement failed too. */
   total: number | null;
+}
+
+/**
+ * Put a ref's failure into one clause a user can act on (F1). The three
+ * causes send a reader to three different places: their config's spelling,
+ * their repository's branches, or git itself.
+ */
+export function describeRefCountFailure(
+  failure: RefCommitCountFailure,
+): string {
+  switch (failure.outcome) {
+    case 'git-failed':
+      return `${failure.ref}: ${failure.detail}`;
+    case 'rejected-name':
+      return `${failure.ref}: not a usable ref name (only letters, digits, '.', '_', '/' and '-' are accepted)`;
+    case 'unresolved':
+      return `${failure.ref}: no such ref in this repository`;
+  }
+}
+
+/** The per-ref causes as one parenthesised clause. */
+function describeRefCountFailures(failures: RefCommitCountFailure[]): string {
+  if (failures.length === 0) {
+    return 'none are configured';
+  }
+
+  return failures.map(describeRefCountFailure).join('; ');
 }
 
 export interface BranchSuffixDecision {
@@ -172,20 +208,24 @@ export function decideBranchSuffix(params: {
   if (counts.mergeBase !== null) {
     base = counts.mergeBase.count;
   } else if (counts.total !== null) {
-    // D5 fallback: no configured main branch resolved, so count everything.
+    // D5 fallback: no configured main branch could be counted, so count
+    // everything. The per-ref cause is named (F1) — a misspelt ref name and a
+    // branch that simply does not exist here are different problems with
+    // different fixes.
     base = counts.total;
     warning =
-      `⚠️  branchSuffix: none of the configured main branches ` +
-      `(${mainBranches.join(', ')}) resolved; counted all ${counts.total} ` +
-      `commits on HEAD instead.`;
+      `⚠️  branchSuffix: none of the configured main branches could be ` +
+      `counted (${describeRefCountFailures(counts.mergeBaseFailures)}); ` +
+      `counted all ${counts.total} commits on HEAD instead.`;
   } else {
     // D5 + critical rule 6: a failed measurement is not a zero. No suffix.
     return {
       decoration: null,
       warning:
         `⚠️  branchSuffix: could not count commits for branch "${branch}" ` +
-        `(neither ${mainBranches.join('/')}..HEAD nor HEAD resolved); ` +
-        `emitting the undecorated version.`,
+        `(${describeRefCountFailures(counts.mergeBaseFailures)}), and ` +
+        `counting all commits on HEAD failed too; emitting the undecorated ` +
+        `version.`,
     };
   }
 
