@@ -79,12 +79,16 @@ export class TestRepo {
    * STRING with flags in it, and a few still rely on shell quoting.
    *
    * @param command - Arguments appended after the CLI path
+   * @param envOverrides - Extra environment, e.g. a stub git's PATH
    * @returns The captured stdout, stderr and exit code
    * @throws If the process could not be spawned, or died on a signal. Neither
    *   is an exit code, and reporting either as one would be a measurement
    *   failure dressed up as a result (critical rule 6).
    */
-  runCli(command: string): CliResult {
+  runCli(
+    command: string,
+    envOverrides: Record<string, string> = {},
+  ): CliResult {
     const cliPath = path.join(__dirname, '..', '..', 'src', 'index.ts');
 
     // Parse command to handle flags
@@ -100,6 +104,7 @@ export class TestRepo {
         GIT_AUTHOR_NAME: 'Test User',
         GIT_COMMITTER_EMAIL: 'test@example.com',
         GIT_COMMITTER_NAME: 'Test User',
+        ...envOverrides,
       },
       shell: true,
     });

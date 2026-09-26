@@ -23,7 +23,7 @@ import {
   writeGeneratedFiles,
 } from './generated-file-policy';
 import {detectRunCommand, installGitHooks} from './git-hooks-manager';
-import {getCurrentBranch, isFileTrackedByGit} from './git-utils';
+import {isFileTrackedByGit, requireCurrentBranch} from './git-utils';
 import {
   MERGE_DRIVER_ATTRIBUTE,
   registerMergeDriver,
@@ -152,8 +152,20 @@ async function ensureGitignoreEntries(
   const gitignorePath = join(process.cwd(), '.gitignore');
 
   // Guard: never modify tracked files
-  const isTracked = await isFileTrackedByGit('.gitignore');
-  if (isTracked) {
+  const tracking = await isFileTrackedByGit('.gitignore');
+
+  // FAIL CLOSED (version-manager-70i.18.1, S7). Before, a failed measurement
+  // read as "untracked", which OPENED this guard and edited a .gitignore
+  // nobody had proved untracked. Said even under --silent, like install's
+  // other warnings: the user has something to do by hand.
+  if (tracking.outcome === 'git-failed') {
+    console.warn(
+      `⚠️  Skipping .gitignore update: could not tell whether it is tracked in git (${tracking.detail}). Please add ${jsonFilename}${generateTypes ? ` and ${dtsFilename}` : ''} manually.`,
+    );
+    return;
+  }
+
+  if (tracking.tracked) {
     if (!silent) {
       console.log(
         `⚠️  Skipping .gitignore update: file is tracked in git. Please add ${jsonFilename}${generateTypes ? ` and ${dtsFilename}` : ''} manually.`,
@@ -367,7 +379,9 @@ async function preCommitEventLogHandler(
   format: OutputFormat | null,
   generateTypes: boolean,
 ): Promise<void> {
-  const branch = await getCurrentBranch();
+  // A failed branch read aborts the commit (70i.18 F2) rather than recording
+  // a commit event on a "HEAD" branch that was never measured.
+  const branch = await requireCurrentBranch();
   const append = appendCommitEvent(branch, new Date());
 
   // Derived AFTER the append, so the number reported is the number the commit

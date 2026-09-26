@@ -3,7 +3,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import {countCommitsSinceRef, isFileTrackedByGit} from '../../src/git-utils';
+import {
+  countCommitsBetween,
+  countCommitsSinceRef,
+  findLastCommitWhereFieldChanged,
+  getCurrentBranch,
+  isFileTrackedByGit,
+  readFieldFromCommit,
+} from '../../src/git-utils';
+import {inDirectory} from '../helpers/in-directory';
 import {TestRepo} from '../helpers/test-repo';
 
 /**
@@ -32,7 +40,7 @@ describe('Git Utils', () => {
       process.chdir(repo.getPath());
       try {
         const result = await isFileTrackedByGit('tracked.txt');
-        expect(result).toBe(true);
+        expect(result).toEqual({outcome: 'measured', tracked: true});
       } finally {
         process.chdir(originalCwd);
       }
@@ -46,7 +54,7 @@ describe('Git Utils', () => {
       process.chdir(repo.getPath());
       try {
         const result = await isFileTrackedByGit('untracked.txt');
-        expect(result).toBe(false);
+        expect(result).toEqual({outcome: 'measured', tracked: false});
       } finally {
         process.chdir(originalCwd);
       }
@@ -64,7 +72,7 @@ describe('Git Utils', () => {
       process.chdir(repo.getPath());
       try {
         const result = await isFileTrackedByGit('ignored.txt');
-        expect(result).toBe(false);
+        expect(result).toEqual({outcome: 'measured', tracked: false});
       } finally {
         process.chdir(originalCwd);
       }
@@ -75,7 +83,7 @@ describe('Git Utils', () => {
       process.chdir(repo.getPath());
       try {
         const result = await isFileTrackedByGit('does-not-exist.txt');
-        expect(result).toBe(false);
+        expect(result).toEqual({outcome: 'measured', tracked: false});
       } finally {
         process.chdir(originalCwd);
       }
@@ -90,7 +98,7 @@ describe('Git Utils', () => {
       process.chdir(repo.getPath());
       try {
         const result = await isFileTrackedByGit('.gitignore');
-        expect(result).toBe(true);
+        expect(result).toEqual({outcome: 'measured', tracked: true});
       } finally {
         process.chdir(originalCwd);
       }
@@ -102,20 +110,6 @@ describe('Git Utils', () => {
    * so the caller's warning could only ever blame one of them.
    */
   describe('countCommitsSinceRef', () => {
-    /** Run `body` with the process cwd inside `dir`, always restoring it. */
-    const inDirectory = async <T>(
-      dir: string,
-      body: () => Promise<T>,
-    ): Promise<T> => {
-      const originalCwd = process.cwd();
-      process.chdir(dir);
-      try {
-        return await body();
-      } finally {
-        process.chdir(originalCwd);
-      }
-    };
-
     test('counts the commits a branch has of its own', async () => {
       repo.writeFile('a.txt', 'a\n');
       repo.makeCommit('base');
@@ -190,6 +184,142 @@ describe('Git Utils', () => {
       } finally {
         fs.rmSync(outsideRepo, {force: true, recursive: true});
       }
+    });
+  });
+
+  /**
+   * version-manager-70i.18.1, S3 and F3: the four states, each a distinct
+   * answer. The exit codes these rest on were measured and are recorded on
+   * the bead.
+   */
+  describe('getCurrentBranch', () => {
+    test('a normal branch reads its name', async () => {
+      repo.writeFile('a.txt', 'a\n');
+      repo.makeCommit('base');
+      repo.createBranch('feat/x');
+
+      const result = await inDirectory(repo.getPath(), getCurrentBranch);
+
+      expect(result).toEqual({branch: 'feat/x', outcome: 'read'});
+    });
+
+    test('an unborn branch reads its REAL name, not "HEAD" (F3)', async () => {
+      // No commits at all. `git rev-parse --abbrev-ref HEAD`, the old
+      // command, fails here, and the old catch reported "HEAD".
+      repo.runGit('symbolic-ref HEAD refs/heads/trunk');
+
+      const result = await inDirectory(repo.getPath(), getCurrentBranch);
+
+      expect(result).toEqual({branch: 'trunk', outcome: 'read'});
+    });
+
+    test('a detached HEAD reads the literal "HEAD" (D6)', async () => {
+      repo.writeFile('a.txt', 'a\n');
+      repo.makeCommit('base');
+      repo.runGit('checkout --detach');
+
+      const result = await inDirectory(repo.getPath(), getCurrentBranch);
+
+      expect(result).toEqual({branch: 'HEAD', outcome: 'read'});
+    });
+
+    test('a git failure is the failure member, never "HEAD"', async () => {
+      const outsideRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-nogit-'));
+
+      try {
+        const result = await inDirectory(outsideRepo, getCurrentBranch);
+
+        expect(result.outcome).toBe('git-failed');
+        if (result.outcome === 'git-failed') {
+          expect(result.detail).toContain('git symbolic-ref');
+          expect(result.detail).toContain('not a git repository');
+        }
+      } finally {
+        fs.rmSync(outsideRepo, {force: true, recursive: true});
+      }
+    });
+  });
+
+  /** version-manager-70i.18.1, S2: "never committed" is a real answer. */
+  describe('findLastCommitWhereFieldChanged', () => {
+    test('an unborn branch is "never-committed", not a failure', async () => {
+      const result = await inDirectory(repo.getPath(), () =>
+        findLastCommitWhereFieldChanged('package.json', 'version'),
+      );
+
+      expect(result).toEqual({outcome: 'never-committed'});
+    });
+
+    test('a file that was never committed is "never-committed"', async () => {
+      repo.writeFile('a.txt', 'a\n');
+      repo.makeCommit('base');
+
+      const result = await inDirectory(repo.getPath(), () =>
+        findLastCommitWhereFieldChanged('package.json', 'version'),
+      );
+
+      expect(result).toEqual({outcome: 'never-committed'});
+    });
+
+    test('finds the commit where the value last changed', async () => {
+      repo.writeFile('package.json', '{"version": "1.0.0"}\n');
+      repo.makeCommit('one');
+      repo.writeFile('package.json', '{"version": "1.1.0"}\n');
+      repo.makeCommit('two');
+      const bump = repo.runGit('rev-parse HEAD').stdout.trim();
+      repo.writeFile('a.txt', 'a\n');
+      repo.makeCommit('three');
+
+      const result = await inDirectory(repo.getPath(), () =>
+        findLastCommitWhereFieldChanged('package.json', 'version'),
+      );
+
+      expect(result).toEqual({commit: bump, outcome: 'found'});
+    });
+  });
+
+  /** S1, S2, S6, S7: outside a repository every one reports the failure. */
+  describe('a git failure is its own outcome', () => {
+    let outsideRepo: string;
+
+    beforeEach(() => {
+      outsideRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-nogit-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(outsideRepo, {force: true, recursive: true});
+    });
+
+    test('countCommitsBetween() is never 0 on failure (S1)', async () => {
+      const result = await inDirectory(outsideRepo, () =>
+        countCommitsBetween('HEAD~1', 'HEAD'),
+      );
+
+      expect(result.outcome).toBe('git-failed');
+    });
+
+    test('findLastCommitWhereFieldChanged() is never "never-committed" on failure (S2)', async () => {
+      const result = await inDirectory(outsideRepo, () =>
+        findLastCommitWhereFieldChanged('package.json', 'version'),
+      );
+
+      expect(result.outcome).toBe('git-failed');
+    });
+
+    test('readFieldFromCommit() is never a null value on failure (S6)', async () => {
+      const result = await inDirectory(outsideRepo, () =>
+        readFieldFromCommit('HEAD', 'package.json', 'version'),
+      );
+
+      expect(result.outcome).toBe('git-failed');
+    });
+
+    test('isFileTrackedByGit() is never "untracked" on failure (S7)', async () => {
+      const result = await inDirectory(outsideRepo, () =>
+        isFileTrackedByGit('.gitignore'),
+      );
+
+      expect(result.outcome).toBe('git-failed');
     });
   });
 });

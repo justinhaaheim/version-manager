@@ -259,151 +259,6 @@ export async function getGitDescribe(): Promise<string> {
   return await execCommand('git describe --always --tags --dirty');
 }
 
-export async function getCurrentBranch(): Promise<string> {
-  try {
-    const branch = await execCommand('git rev-parse --abbrev-ref HEAD');
-    return branch;
-  } catch {
-    return 'HEAD';
-  }
-}
-
-export async function hasUncommittedChanges(): Promise<boolean> {
-  try {
-    const status = await execCommand('git status --porcelain');
-    return status.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Check if a file is tracked by git (not gitignored)
- * @param filePath - Path to the file (relative to repo root or absolute)
- * @returns true if the file is tracked, false if gitignored or not in repo
- */
-export async function isFileTrackedByGit(filePath: string): Promise<boolean> {
-  try {
-    // git ls-files returns the filename if it's tracked, empty if not
-    const result = await execCommand(`git ls-files -- "${filePath}"`);
-    return result.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Find the last commit where a specific field value changed in a JSON file
- * @param filePath - Path to the JSON file (relative to repo root)
- * @param fieldName - Name of the field to track (e.g., 'codeVersionBase')
- * @returns The commit hash where the field last changed, or null if not found
- */
-export async function findLastCommitWhereFieldChanged(
-  filePath: string,
-  fieldName: string,
-): Promise<string | null> {
-  try {
-    // Get all commits that touched this file
-    const commitList = await execCommand(`git log --format=%H -- ${filePath}`);
-
-    if (!commitList) {
-      return null; // File has never been committed
-    }
-
-    const commits = commitList.split('\n').filter(Boolean);
-
-    if (commits.length === 0) {
-      return null;
-    }
-
-    // Get current value of the field
-    let currentValue: string | undefined;
-    try {
-      const currentContent = await execCommand(`git show HEAD:${filePath}`);
-      const currentJson = JSON.parse(currentContent) as Record<string, unknown>;
-      currentValue = currentJson[fieldName] as string;
-    } catch {
-      // If we can't read current value, return the first commit
-      return commits[0];
-    }
-
-    // Walk backwards through commits to find where value changed
-    for (let i = 0; i < commits.length; i++) {
-      const commit = commits[i];
-
-      try {
-        const content = await execCommand(`git show ${commit}:${filePath}`);
-        const json = JSON.parse(content) as Record<string, unknown>;
-        const value = json[fieldName] as string;
-
-        // If value differs from current, this is where it last changed
-        if (value !== currentValue) {
-          // Return the commit AFTER this one (where the change happened)
-          return i > 0 ? commits[i - 1] : commits[0];
-        }
-      } catch {
-        // If we can't parse JSON from this commit, skip it
-        continue;
-      }
-    }
-
-    // If we've gone through all commits and value never changed,
-    // return the oldest commit (where it was first set)
-    return commits[commits.length - 1];
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Count commits between two refs
- * @param fromRef - Starting commit hash or ref
- * @param toRef - Ending commit hash or ref
- * @returns Number of commits between the two refs
- */
-export async function countCommitsBetween(
-  fromRef: string,
-  toRef: string,
-): Promise<number> {
-  try {
-    const count = await execCommand(
-      `git rev-list --count ${fromRef}..${toRef}`,
-    );
-    return parseInt(count, 10);
-  } catch {
-    return 0;
-  }
-}
-
-/**
- * Refs we are willing to hand to git. Deliberately narrow: the ref comes from
- * version-manager.json (branchSuffix.mainBranches), so it is user-authored
- * text. The counting below is argv-based rather than shell-based, so this is
- * no longer about shell metacharacters — it is about whitespace and leading
- * dashes reaching git's own option parser as flags.
- */
-const SAFE_REF_PATTERN = /^[A-Za-z0-9._/-]+$/;
-
-/**
- * Why a ref could not be counted. Three genuinely different facts, kept
- * apart so the message a user reads names the one that actually happened
- * (version-manager-70i.13 F1).
- */
-export type RefCommitCountFailure =
-  | {
-      /** git's own stderr, or the reason git could not be run at all. */
-      detail: string;
-      outcome: 'git-failed';
-      ref: string;
-    }
-  | {outcome: 'rejected-name'; ref: string}
-  | {outcome: 'unresolved'; ref: string};
-
-/** The outcome of counting commits since a ref: one count, or one cause. */
-export type RefCommitCount =
-  | {count: number; outcome: 'counted'; ref: string}
-  | RefCommitCountFailure;
-
 /** One git invocation's result, with a non-zero exit treated as data. */
 interface GitAttempt {
   exitCode: number;
@@ -459,6 +314,421 @@ function gitFailureDetail(args: string[], attempt: GitAttempt): string {
     ? `\`${printable}\` exited ${attempt.exitCode}`
     : `\`${printable}\` failed (exit ${attempt.exitCode}): ${stderr}`;
 }
+
+/**
+ * A git measurement that could not be taken (version-manager-70i.18.1).
+ *
+ * The failure member of every measurement below. It is its own type member,
+ * never a sentinel that is also a legal answer — not 0 commits, not "never
+ * changed", not the string "HEAD", not "untracked" (critical rule 6). `detail`
+ * names the git command and carries git's own stderr, so a caller can end the
+ * command with it as it stands (70i.18 F1).
+ */
+export interface GitMeasurementFailure {
+  detail: string;
+  outcome: 'git-failed';
+}
+
+/** One git invocation, or the reason it could not be run at all. */
+type GitRun = {attempt: GitAttempt; outcome: 'ran'} | GitMeasurementFailure;
+
+/**
+ * gitAttempt(), with "git could not be run at all" folded into the failure
+ * member instead of thrown, so every measurement below has one failure path.
+ */
+async function runGit(args: string[]): Promise<GitRun> {
+  try {
+    return {attempt: await gitAttempt(args), outcome: 'ran'};
+  } catch (error) {
+    return {
+      detail: error instanceof Error ? error.message : String(error),
+      outcome: 'git-failed',
+    };
+  }
+}
+
+/** The failure member for a git command that ran and exited badly. */
+function gitFailed(args: string[], attempt: GitAttempt): GitMeasurementFailure {
+  return {detail: gitFailureDetail(args, attempt), outcome: 'git-failed'};
+}
+
+/** The current branch: a name, "HEAD" when detached, or the failure. */
+export type CurrentBranch =
+  | {branch: string; outcome: 'read'}
+  | GitMeasurementFailure;
+
+/**
+ * Read the current branch (version-manager-70i.18.1, S3).
+ *
+ * `git symbolic-ref --quiet --short HEAD` rather than `git rev-parse
+ * --abbrev-ref HEAD`, because the latter FAILS on an unborn branch (exit
+ * 128), and the old catch turned that into "HEAD" (F3). Exit codes MEASURED
+ * 2026-09-26 with git 2.54.0: 0 with the name on a branch, unborn or not;
+ * 1 with no output on a detached HEAD; 128 when git fails (not a repository,
+ * a corrupt HEAD).
+ *
+ * @returns The branch name, "HEAD" for a detached HEAD (D6 keys off that
+ *   literal), or the failure member. A failure is NEVER "HEAD": that would
+ *   silently read as detached and suppress the branch suffix.
+ */
+export async function getCurrentBranch(): Promise<CurrentBranch> {
+  const args = ['symbolic-ref', '--quiet', '--short', 'HEAD'];
+  const run = await runGit(args);
+
+  if (run.outcome === 'git-failed') {
+    return run;
+  }
+
+  const {attempt} = run;
+  const printed = attempt.stdout.trim();
+
+  if (attempt.exitCode === 0 && printed !== '') {
+    return {branch: printed, outcome: 'read'};
+  }
+
+  if (attempt.exitCode === 1 && printed === '') {
+    return {branch: 'HEAD', outcome: 'read'};
+  }
+
+  return gitFailed(args, attempt);
+}
+
+/**
+ * The current branch, or an Error that ends the command (70i.18 F1, F2).
+ *
+ * Every caller writes the branch into DynamicVersion.branch or into an
+ * event-log commit event's "b" field, and there is no honest string to put
+ * there when it could not be read — so a failed read is not handed on.
+ *
+ * @throws If git failed, naming the command and git's stderr
+ */
+export async function requireCurrentBranch(): Promise<string> {
+  const reading = await getCurrentBranch();
+
+  if (reading.outcome === 'git-failed') {
+    throw new Error(`Could not read the current branch: ${reading.detail}`);
+  }
+
+  return reading.branch;
+}
+
+export async function hasUncommittedChanges(): Promise<boolean> {
+  try {
+    const status = await execCommand('git status --porcelain');
+    return status.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a path is tracked, or the failure. */
+export type FileTracking =
+  | {outcome: 'measured'; tracked: boolean}
+  | GitMeasurementFailure;
+
+/**
+ * Check if a file is tracked by git (version-manager-70i.18.1, S7).
+ *
+ * The one caller guards "never modify a tracked file" with this, so a failure
+ * must stay distinguishable from "untracked": reading it as untracked is what
+ * would OPEN the guard.
+ *
+ * @param filePath - Path to the file, relative to the current directory
+ * @returns tracked true/false, or the failure member
+ */
+export async function isFileTrackedByGit(
+  filePath: string,
+): Promise<FileTracking> {
+  // argv, not a shell string: the path is passed through verbatim.
+  const args = ['ls-files', '--', filePath];
+  const run = await runGit(args);
+
+  if (run.outcome === 'git-failed') {
+    return run;
+  }
+
+  if (run.attempt.exitCode !== 0) {
+    return gitFailed(args, run.attempt);
+  }
+
+  // ls-files prints the path if it is tracked and nothing if it is not.
+  return {outcome: 'measured', tracked: run.attempt.stdout.trim() !== ''};
+}
+
+/** A file's content at one commit: the text, absent, or the failure. */
+type FileAtCommit =
+  | {content: string; outcome: 'read'}
+  | {outcome: 'absent'}
+  | GitMeasurementFailure;
+
+/**
+ * Read `<commit>:<filePath>` out of git, keeping "that commit has no such
+ * file" apart from "git failed" — the old `git show` in a catch-all could not.
+ *
+ * The path is resolved from the repository root, exactly as the `git show
+ * <commit>:<path>` this replaces did. Exit codes of `rev-parse --verify
+ * --quiet <commit>:<path>` MEASURED 2026-09-26 with git 2.54.0: 0 with the
+ * blob id when the path is there, 1 with no output when it is not, 128 when
+ * git fails.
+ */
+async function readFileAtCommit(
+  commit: string,
+  filePath: string,
+): Promise<FileAtCommit> {
+  const resolveArgs = [
+    'rev-parse',
+    '--verify',
+    '--quiet',
+    `${commit}:${filePath}`,
+  ];
+  const resolved = await runGit(resolveArgs);
+
+  if (resolved.outcome === 'git-failed') {
+    return resolved;
+  }
+
+  const objectId = resolved.attempt.stdout.trim();
+
+  if (resolved.attempt.exitCode === 1 && objectId === '') {
+    return {outcome: 'absent'};
+  }
+
+  if (resolved.attempt.exitCode !== 0) {
+    return gitFailed(resolveArgs, resolved.attempt);
+  }
+
+  const readArgs = ['cat-file', 'blob', objectId];
+  const read = await runGit(readArgs);
+
+  if (read.outcome === 'git-failed') {
+    return read;
+  }
+
+  if (read.attempt.exitCode !== 0) {
+    return gitFailed(readArgs, read.attempt);
+  }
+
+  return {content: read.attempt.stdout, outcome: 'read'};
+}
+
+/** JSON text parsed as an object, or null when it is not one. */
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+
+    return typeof parsed === 'object' &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where a JSON field last changed, as one of four distinct facts
+ * (version-manager-70i.18.1, S2).
+ *
+ * - `found`: the commit where the value last changed.
+ * - `never-committed`: the branch has no commits yet, or the file has never
+ *   been committed. A REAL answer (F3): zero commits since.
+ * - `unreadable-at-head`: the file at HEAD is not a JSON object, so there is
+ *   no current value to compare history against, and any commit named would
+ *   be made up (F5 b).
+ * - `git-failed`: a git command failed.
+ */
+export type FieldChangeLookup =
+  | {commit: string; outcome: 'found'}
+  | {detail: string; outcome: 'unreadable-at-head'}
+  | {outcome: 'never-committed'}
+  | GitMeasurementFailure;
+
+/**
+ * Find the last commit where a specific field value changed in a JSON file.
+ *
+ * Each of the three old catch-alls is now dispositioned on its own (70i.18 F5):
+ * (a) a failed `git log` is a failure, not "never changed";
+ * (b) a failed read of HEAD is a failure, and HEAD content that is not a JSON
+ *     object is `unreadable-at-head` — neither returns the newest commit;
+ * (c) a historical commit whose file is absent or not a JSON object is still
+ *     skipped, which is legitimate history, but a failed git read is a failure.
+ *
+ * @param filePath - Path to the JSON file (relative to repo root)
+ * @param fieldName - Name of the field to track (e.g., 'version')
+ * @returns One of the four outcomes of FieldChangeLookup
+ */
+export async function findLastCommitWhereFieldChanged(
+  filePath: string,
+  fieldName: string,
+): Promise<FieldChangeLookup> {
+  // "No commits yet" is a legitimate state (F3), and `git log` fails in it
+  // (exit 128, measured), so it is asked about first. `rev-parse --verify
+  // --quiet HEAD` exits 1 with no output on an unborn branch (measured).
+  const headArgs = ['rev-parse', '--verify', '--quiet', 'HEAD'];
+  const head = await runGit(headArgs);
+
+  if (head.outcome === 'git-failed') {
+    return head;
+  }
+
+  if (head.attempt.exitCode === 1 && head.attempt.stdout.trim() === '') {
+    return {outcome: 'never-committed'};
+  }
+
+  if (head.attempt.exitCode !== 0) {
+    return gitFailed(headArgs, head.attempt);
+  }
+
+  // (a) Every commit that touched the file, newest first.
+  const logArgs = ['log', '--format=%H', '--', filePath];
+  const log = await runGit(logArgs);
+
+  if (log.outcome === 'git-failed') {
+    return log;
+  }
+
+  if (log.attempt.exitCode !== 0) {
+    return gitFailed(logArgs, log.attempt);
+  }
+
+  const commits = log.attempt.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+
+  if (commits.length === 0) {
+    return {outcome: 'never-committed'};
+  }
+
+  // (b) The value at HEAD, which the walk compares every commit against.
+  const current = await readFileAtCommit('HEAD', filePath);
+
+  if (current.outcome === 'git-failed') {
+    return current;
+  }
+
+  let currentValue: unknown;
+
+  if (current.outcome === 'read') {
+    const currentJson = parseJsonObject(current.content);
+
+    if (currentJson === null) {
+      return {
+        detail: `${filePath} as committed at HEAD is not a JSON object, so there is no current ${fieldName} to compare its history against. Commit a valid ${filePath} (in package-json mode, with --no-verify).`,
+        outcome: 'unreadable-at-head',
+      };
+    }
+
+    currentValue = currentJson[fieldName];
+  }
+  // Absent at HEAD: the file was deleted there, and "absent" is a real value.
+  // The walk below skips absent commits, so it names the deletion commit —
+  // the same answer the old code gave, now reached rather than defaulted to.
+
+  // Walk backwards through commits to find where value changed
+  for (let i = 0; i < commits.length; i++) {
+    const commit = commits[i];
+    const read = await readFileAtCommit(commit, filePath);
+
+    // (c) A failed read is a failure...
+    if (read.outcome === 'git-failed') {
+      return read;
+    }
+
+    // ...but absent or unparseable historical content is legitimate history,
+    // and is skipped exactly as before.
+    if (read.outcome === 'absent') {
+      continue;
+    }
+
+    const json = parseJsonObject(read.content);
+
+    if (json === null) {
+      continue;
+    }
+
+    // If value differs from current, this is where it last changed
+    if (json[fieldName] !== currentValue) {
+      // Return the commit AFTER this one (where the change happened)
+      return {commit: i > 0 ? commits[i - 1] : commits[0], outcome: 'found'};
+    }
+  }
+
+  // If we've gone through all commits and value never changed,
+  // return the oldest commit (where it was first set)
+  return {commit: commits[commits.length - 1], outcome: 'found'};
+}
+
+/** A commit count, or the failure. */
+export type CommitCount =
+  | {count: number; outcome: 'counted'}
+  | GitMeasurementFailure;
+
+/**
+ * Count commits between two refs (version-manager-70i.18.1, S1).
+ *
+ * @param fromRef - Starting commit hash or ref
+ * @param toRef - Ending commit hash or ref
+ * @returns The count, or the failure member. NEVER 0 on failure: 0 is a real
+ *   answer meaning "no commits since" (critical rule 6).
+ */
+export async function countCommitsBetween(
+  fromRef: string,
+  toRef: string,
+): Promise<CommitCount> {
+  const args = ['rev-list', '--count', `${fromRef}..${toRef}`];
+  const run = await runGit(args);
+
+  if (run.outcome === 'git-failed') {
+    return run;
+  }
+
+  if (run.attempt.exitCode !== 0) {
+    return gitFailed(args, run.attempt);
+  }
+
+  const printed = run.attempt.stdout.trim();
+  const count = parseInt(printed, 10);
+
+  if (isNaN(count)) {
+    return {
+      detail: `\`git ${args.join(' ')}\` printed ${JSON.stringify(printed)}, which is not a number`,
+      outcome: 'git-failed',
+    };
+  }
+
+  return {count, outcome: 'counted'};
+}
+
+/**
+ * Refs we are willing to hand to git. Deliberately narrow: the ref comes from
+ * version-manager.json (branchSuffix.mainBranches), so it is user-authored
+ * text. The counting below is argv-based rather than shell-based, so this is
+ * no longer about shell metacharacters — it is about whitespace and leading
+ * dashes reaching git's own option parser as flags.
+ */
+const SAFE_REF_PATTERN = /^[A-Za-z0-9._/-]+$/;
+
+/**
+ * Why a ref could not be counted. Three genuinely different facts, kept
+ * apart so the message a user reads names the one that actually happened
+ * (version-manager-70i.13 F1).
+ */
+export type RefCommitCountFailure =
+  | {
+      /** git's own stderr, or the reason git could not be run at all. */
+      detail: string;
+      outcome: 'git-failed';
+      ref: string;
+    }
+  | {outcome: 'rejected-name'; ref: string}
+  | {outcome: 'unresolved'; ref: string};
+
+/** The outcome of counting commits since a ref: one count, or one cause. */
+export type RefCommitCount =
+  | {count: number; outcome: 'counted'; ref: string}
+  | RefCommitCountFailure;
 
 /**
  * Count the commits on HEAD that are not reachable from `ref` — i.e. the
@@ -549,23 +819,43 @@ export async function countCommitsOnHead(): Promise<number | null> {
   }
 }
 
+/** A field's value at one commit, or the failure. */
+export type FieldAtCommit =
+  | {outcome: 'read'; value: string | null}
+  | GitMeasurementFailure;
+
 /**
  * Read a field value from a JSON file at a specific commit
+ * (version-manager-70i.18.1, S6).
+ *
  * @param commit - Commit hash or ref
  * @param filePath - Path to the JSON file (relative to repo root)
  * @param fieldName - Name of the field to read
- * @returns The field value, or null if not found
+ * @returns `value` null when the file or the field is absent at that commit,
+ *   or the file there is not a JSON object — facts about the content, which
+ *   is what null meant before. A failed git read is the failure member, and
+ *   no longer also null.
  */
 export async function readFieldFromCommit(
   commit: string,
   filePath: string,
   fieldName: string,
-): Promise<string | null> {
-  try {
-    const content = await execCommand(`git show ${commit}:${filePath}`);
-    const json = JSON.parse(content) as Record<string, unknown>;
-    return (json[fieldName] as string) ?? null;
-  } catch {
-    return null;
+): Promise<FieldAtCommit> {
+  const read = await readFileAtCommit(commit, filePath);
+
+  if (read.outcome === 'git-failed') {
+    return read;
   }
+
+  if (read.outcome === 'absent') {
+    return {outcome: 'read', value: null};
+  }
+
+  const json = parseJsonObject(read.content);
+
+  return {
+    outcome: 'read',
+    value:
+      json === null ? null : ((json[fieldName] as string | undefined) ?? null),
+  };
 }

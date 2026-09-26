@@ -1,5 +1,4 @@
 import {afterEach, beforeEach, describe, expect, test} from 'bun:test';
-import {execSync} from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -9,6 +8,7 @@ import {
   setupPackageJsonModeRepo,
   setupRepoForInstall,
 } from '../helpers/repo-fixtures';
+import {type FailingGitStub, stubFailingGit} from '../helpers/stub-git';
 import {TestRepo} from '../helpers/test-repo';
 
 /**
@@ -73,53 +73,16 @@ function headVersion(repo: TestRepo): string {
 }
 
 /**
- * Make ONE git subcommand fail inside the hook, passing every other
- * invocation through to the real git.
- *
- * This is how a staging failure is induced for real (70i.4 AC1) rather than
- * mocked: only the hook's own call to that subcommand breaks, while the `git
- * commit` that triggered the hook, and all the hook's reads, run normally.
- * The stub touches a marker file when it intercepts, so a test can prove the
- * induction actually happened rather than passing for some other reason.
- *
- * THE STUB IS DELIVERED VIA GIT_EXEC_PATH, NOT VIA PATH, and that is not
- * decoration: git PREPENDS its exec-path to PATH before running a hook, and
- * on macOS that directory contains a `git` binary of its own — so a stub
- * merely first on PATH is shadowed and never called (measured: the hook's
- * thirteen git invocations all reached the real binary). Pointing
- * GIT_EXEC_PATH at our own directory puts the stub in that same privileged
- * position. A directory holding only the stub is enough; `git commit` needs
- * no helper from exec-path.
- *
- * @param repo - The fixture repo; the stub lives inside it and dies with it
- * @param subcommand - The git subcommand to fail, matched as the first argument
- * @returns The env overrides to run git with, and the marker file's path
+ * Make `git update-index` fail INSIDE THE HOOK, passing every other git
+ * invocation through (70i.4 AC1). Delivered via GIT_EXEC_PATH: see
+ * tests/helpers/stub-git.ts for why a stub first on PATH is not enough there.
  */
-function stubFailingGit(
-  repo: TestRepo,
-  subcommand: string,
-): {envOverrides: Record<string, string>; marker: string} {
-  const realGit = execSync('command -v git', {encoding: 'utf-8'}).trim();
-  const stubDir = path.join(repo.getPath(), 'stub-git-exec-path');
-  const marker = path.join(repo.getPath(), `stub-git-${subcommand}-was-called`);
-
-  fs.mkdirSync(stubDir, {recursive: true});
-  fs.writeFileSync(
-    path.join(stubDir, 'git'),
-    [
-      '#!/bin/sh',
-      `if [ "$1" = "${subcommand}" ]; then`,
-      `  touch "${marker}"`,
-      `  echo "stub git: deliberate ${subcommand} failure" >&2`,
-      '  exit 1',
-      'fi',
-      `exec "${realGit}" "$@"`,
-      '',
-    ].join('\n'),
-  );
-  fs.chmodSync(path.join(stubDir, 'git'), 0o755);
-
-  return {envOverrides: {GIT_EXEC_PATH: stubDir}, marker};
+function stubFailingUpdateIndex(repo: TestRepo): FailingGitStub {
+  return stubFailingGit(repo.getPath(), {
+    delivery: 'exec-path',
+    label: 'update-index',
+    match: {prefix: 'update-index'},
+  });
 }
 
 /**
@@ -783,7 +746,7 @@ describe('package-json version mode', () => {
       activateHooks(repo);
 
       const headBefore = repo.runGit('rev-parse HEAD').stdout.trim();
-      const stub = stubFailingGit(repo, 'update-index');
+      const stub = stubFailingUpdateIndex(repo);
 
       repo.writeFile('a.txt', 'a\n');
       repo.runGit('add a.txt');
@@ -864,7 +827,7 @@ describe('package-json version mode', () => {
       fs.chmodSync(hookPath, 0o755);
 
       const headBefore = repo.runGit('rev-parse HEAD').stdout.trim();
-      const stub = stubFailingGit(repo, 'update-index');
+      const stub = stubFailingUpdateIndex(repo);
 
       repo.writeFile('a.txt', 'a\n');
       repo.runGit('add a.txt');

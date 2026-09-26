@@ -33,11 +33,11 @@ import {
   countCommitsOnHead,
   countCommitsSinceRef,
   findLastCommitWhereFieldChanged,
-  getCurrentBranch,
   getGitDescribe,
   isGitRepository,
   readFieldFromCommit,
   type RefCommitCountFailure,
+  requireCurrentBranch,
 } from './git-utils';
 import {getPackageVersion, readPreCommitBaseVersion} from './script-manager';
 import {
@@ -212,6 +212,50 @@ async function planBranchSuffix(
 }
 
 /**
+ * Find the commit where package.json's version last changed and count the
+ * commits since, ENDING THE COMMAND when either measurement fails
+ * (version-manager-70i.18.1, S1 S2; 70i.18 F1).
+ *
+ * Before 70i.18.1 a failed lookup read as "never changed" and a failed count
+ * read as 0, so a broken git computed the base version (plus one in the
+ * pre-commit path) with nothing red anywhere.
+ *
+ * @returns lastCommit null ONLY when the branch has no commits yet or
+ *   package.json has never been committed — states where 0 commits since is
+ *   the true answer (F3)
+ * @throws If git fails, or package.json at HEAD is not a JSON object
+ */
+async function measureCommitsSinceVersionChange(): Promise<{
+  commitsSince: number;
+  lastCommit: string | null;
+}> {
+  const lookup = await findLastCommitWhereFieldChanged(
+    'package.json',
+    'version',
+  );
+
+  if (lookup.outcome === 'never-committed') {
+    return {commitsSince: 0, lastCommit: null};
+  }
+
+  if (lookup.outcome !== 'found') {
+    throw new Error(
+      `Could not find the commit where package.json's version last changed: ${lookup.detail}`,
+    );
+  }
+
+  const counted = await countCommitsBetween(lookup.commit, 'HEAD');
+
+  if (counted.outcome === 'git-failed') {
+    throw new Error(
+      `Could not count the commits since package.json's version last changed (at ${lookup.commit}): ${counted.detail}`,
+    );
+  }
+
+  return {commitsSince: counted.count, lastCommit: lookup.commit};
+}
+
+/**
  * Apply a suffix decision to a computed version.
  *
  * @param version - The version as computed by the normal calculation
@@ -330,8 +374,9 @@ export async function generateFileBasedVersion(
     );
   }
 
-  // Get git branch and dirty status
-  const branch = await getCurrentBranch();
+  // Get git branch and dirty status. A failed branch read ends the command
+  // (70i.18 F2): it is never reported as a detached "HEAD".
+  const branch = await requireCurrentBranch();
   const gitDescribe = await getGitDescribe();
   const dirty = gitDescribe.includes('-dirty');
 
@@ -371,25 +416,30 @@ export async function generateFileBasedVersion(
     ? stripPrerelease(rawBaseVersion)
     : rawBaseVersion;
 
-  // Find last commit where package.json version changed
-  const lastCommit = await findLastCommitWhereFieldChanged(
-    'package.json',
-    'version',
-  );
-
-  // Count commits since last change
-  let commitsSince = lastCommit
-    ? await countCommitsBetween(lastCommit, 'HEAD')
-    : 0;
+  // Find last commit where package.json version changed, and count the
+  // commits since. Either failing ends the command (70i.18.1, S1 S2).
+  const measured = await measureCommitsSinceVersionChange();
+  const {lastCommit} = measured;
+  let {commitsSince} = measured;
 
   // Check if version has changed in working tree (uncommitted)
   // If current version differs from last committed version, treat as 0 commits
-  if (lastCommit) {
-    const rawCommittedVersion = await readFieldFromCommit(
+  if (lastCommit !== null) {
+    const committed = await readFieldFromCommit(
       lastCommit,
       'package.json',
       'version',
     );
+
+    // S6: a failed read used to arrive as null, which silently skipped this
+    // check. It ends the command instead.
+    if (committed.outcome === 'git-failed') {
+      throw new Error(
+        `Could not read the version package.json had at ${lastCommit}: ${committed.detail}`,
+      );
+    }
+
+    const rawCommittedVersion = committed.value;
     const committedVersion =
       rawCommittedVersion !== null && ownsPrerelease
         ? stripPrerelease(rawCommittedVersion)
@@ -538,8 +588,9 @@ export async function generatePreCommitVersionData(
     );
   }
 
-  // Get git branch and dirty status
-  const branch = await getCurrentBranch();
+  // Get git branch and dirty status. A failed branch read ends the command
+  // (70i.18 F2): it is never reported as a detached "HEAD".
+  const branch = await requireCurrentBranch();
   const gitDescribe = await getGitDescribe();
   const dirty = gitDescribe.includes('-dirty');
 
@@ -575,16 +626,11 @@ export async function generatePreCommitVersionData(
     console.log('   Moved runtimeVersion to versions.runtime');
   }
 
-  // Find last commit where package.json version changed
-  const lastCommit = await findLastCommitWhereFieldChanged(
-    'package.json',
-    'version',
-  );
-
-  // Count commits since last change
-  const commitsSinceLastChange = lastCommit
-    ? await countCommitsBetween(lastCommit, 'HEAD')
-    : 0;
+  // Find last commit where package.json version changed, and count the
+  // commits since. Either failing ends the command and aborts the commit
+  // (70i.18.1, S1 S2): a failure used to compute base+1 here.
+  const {commitsSince: commitsSinceLastChange} =
+    await measureCommitsSinceVersionChange();
 
   // D3: while the knob is on, version-manager owns the prerelease segment. In
   // this mode the decorated version is COMMITTED into package.json and read
@@ -690,7 +736,8 @@ export async function generateEventLogVersionData(
     );
   }
 
-  const branch = await getCurrentBranch();
+  // A failed branch read ends the command (70i.18 F2).
+  const branch = await requireCurrentBranch();
   const gitDescribe = await getGitDescribe();
   const dirty = gitDescribe.includes('-dirty');
 
