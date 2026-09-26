@@ -37,7 +37,12 @@ interface WatcherExit {
  */
 function startWatcher(
   repoPath: string,
-  options: {debounce?: number; output?: string; silent?: boolean} = {},
+  options: {
+    debounce?: number;
+    noFail?: boolean;
+    output?: string;
+    silent?: boolean;
+  } = {},
 ): {
   cleanup: () => void;
   getStderr: () => string;
@@ -58,6 +63,10 @@ function startWatcher(
 
   if (options.silent) {
     args.push('--silent');
+  }
+
+  if (options.noFail) {
+    args.push('--no-fail');
   }
 
   const proc = spawn('bun', [cliPath, ...args], {
@@ -691,6 +700,117 @@ describe('Watch Command in modes with no generated file (version-manager-70i.11)
         expect(watcher.getStdout()).toContain(
           'versionMode is "event-log", which writes no dynamic-version.local.json.',
         );
+      } finally {
+        watcher.cleanup();
+      }
+    },
+    MODE_TEST_TIMEOUT_MS,
+  );
+});
+
+/**
+ * A regeneration that fails while the watcher runs (version-manager-70i.31).
+ *
+ * The failure is induced by writing an invalid version-manager.json under a
+ * running watcher: getVersionMode() throws on it (70i.18.2), and the config
+ * file is itself watched, so the same write is the trigger.
+ *
+ * Before 70i.31 the error was rethrown inside `void regenerateVersion(...)` in
+ * the debounce setTimeout: an unhandled promise rejection, not the command's
+ * failure path.
+ */
+describe('Watch Command when a regeneration fails (version-manager-70i.31)', () => {
+  let repo: TestRepo;
+
+  beforeEach(() => {
+    repo = new TestRepo();
+  });
+
+  afterEach(() => {
+    repo.cleanup();
+  });
+
+  /** Not JSON at all: the config read throws naming the file. */
+  const INVALID_CONFIG = '{"versionMode": ';
+
+  test(
+    '--fail (the default): the watcher stops and exits 1 with the "❌ Failed:" line, like every command',
+    async () => {
+      setupRepoWithVersionConfig(repo, '0.1.0', '0.1.0', 'add-to-patch');
+
+      const watcher = startWatcher(repo.getPath(), {debounce: 300});
+
+      try {
+        await watcher.waitForReady(15000);
+
+        repo.writeFile('version-manager.json', INVALID_CONFIG);
+
+        const exit = await watcher.waitForExit(10000);
+        const stderr = watcher.getStderr();
+
+        // It ended by itself with 1. NOT sufficient on its own: measured before
+        // the fix, bun 1.4.2 also exits 1 on the unhandled rejection.
+        expect(exit).toEqual({code: 1, signal: null});
+
+        // One "❌ Failed:" line naming the file, as main() prints for every
+        // other command's failure.
+        expect(stderr).toContain('❌ Failed:');
+        expect(stderr).toContain('version-manager.json is not valid JSON');
+
+        // Not the runtime's report of an unhandled rejection: before the fix,
+        // bun printed a source excerpt, a stack trace and its version footer.
+        expect(stderr).not.toMatch(/^\s+at /m);
+        expect(stderr).not.toContain('Bun v');
+        expect(stderr).not.toContain('Unexpected error');
+        expect(stderr).not.toMatch(/unhandled/i);
+      } finally {
+        watcher.cleanup();
+      }
+    },
+    MODE_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    '--no-fail: the failure is logged, the watcher keeps watching, and the next good regeneration writes',
+    async () => {
+      setupRepoWithVersionConfig(repo, '0.1.0', '0.1.0', 'add-to-patch');
+      const validConfig = repo.readFile('version-manager.json');
+
+      const versionFilePath = path.join(
+        repo.getPath(),
+        'dynamic-version.local.json',
+      );
+
+      const watcher = startWatcher(repo.getPath(), {
+        debounce: 300,
+        noFail: true,
+      });
+
+      try {
+        await watcher.waitForReady(15000);
+
+        repo.writeFile('version-manager.json', INVALID_CONFIG);
+
+        const logged = await waitUntil(
+          () => watcher.getStderr().includes('Failed to regenerate version'),
+          8000,
+        );
+        expect(logged).toBe(true);
+
+        // Still running: it did not exit, 0 or otherwise.
+        expect(await watcher.waitForExit(1500)).toBeNull();
+
+        // Repair the config; the watcher tries again and succeeds.
+        repo.writeFile('version-manager.json', validConfig);
+
+        const regenerated = await waitUntil(
+          () =>
+            watcher.getStdout().includes('Version regenerated') &&
+            fs.existsSync(versionFilePath),
+          8000,
+        );
+        expect(regenerated).toBe(true);
+        expect(await watcher.waitForExit(500)).toBeNull();
       } finally {
         watcher.cleanup();
       }

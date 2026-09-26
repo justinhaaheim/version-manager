@@ -1035,10 +1035,12 @@ async function watchCommand(
   process.on('SIGINT', handleShutdown);
   process.on('SIGTERM', handleShutdown);
 
-  // Keep process alive
-  await new Promise(() => {
-    // Never resolves - keeps watching until interrupted
-  });
+  // Keep watching until interrupted. `failed` settles only when a
+  // regeneration failed under --fail (the default), after the watcher has
+  // stopped; throwing it here fails this command the way every command fails:
+  // "❌ Failed: <message>" and failureExitCode() (version-manager-70i.31).
+  // With --no-fail it never settles, and chokidar keeps the process alive.
+  throw await watcher.failed;
 }
 
 /**

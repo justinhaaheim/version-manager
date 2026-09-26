@@ -21,7 +21,11 @@ import {
 export interface WatcherOptions {
   /** Debounce delay in milliseconds */
   debounce: number;
-  /** Exit on errors */
+  /**
+   * Exit on errors. On, a failed regeneration stops the watcher and settles
+   * `failed` (version-manager-70i.31); off, it is logged and the watcher
+   * keeps watching.
+   */
   failOnError: boolean;
   /** Generate TypeScript definitions */
   generateTypes: boolean;
@@ -46,6 +50,13 @@ export type WatcherStartResult =
   | {
       /** Stops the watcher */
       cleanup: () => void;
+      /**
+       * Settles, with the error, only when a regeneration failed under
+       * failOnError — by then the watcher has already stopped. It never
+       * rejects and, with failOnError off, never settles
+       * (version-manager-70i.31).
+       */
+      failed: Promise<Error>;
       status: 'started';
     }
   | {
@@ -99,6 +110,15 @@ export async function startWatcher(
   let debounceTimer: NodeJS.Timeout | null = null;
   let changesPending = false;
   let lastChangedFile: string | null = null;
+
+  // version-manager-70i.31: where a failed regeneration goes under
+  // failOnError. It used to be rethrown inside `void regenerateVersion(...)`
+  // in the debounce timer — an unhandled rejection, never the command's
+  // failure path. Resolved at most once; later calls are no-ops.
+  let reportFailure: (error: Error) => void = () => undefined;
+  const regenerationFailure = new Promise<Error>((resolve) => {
+    reportFailure = resolve;
+  });
 
   /**
    * Regenerate version file (debounced)
@@ -159,12 +179,15 @@ export async function startWatcher(
         console.log(`ℹ️  No version change detected (${reason})`);
       }
     } catch (error) {
-      if (!silent) {
-        console.error('❌ Failed to regenerate version:', error);
-      }
-
+      // failOnError: the caller stops the watcher and fails the command,
+      // which prints the one "❌ Failed:" line (70i.31). Logging it here too
+      // would report the same failure twice.
       if (failOnError) {
         throw error;
+      }
+
+      if (!silent) {
+        console.error('❌ Failed to regenerate version:', error);
       }
     }
   };
@@ -187,7 +210,13 @@ export async function startWatcher(
         const reason = lastChangedFile
           ? `changed: ${lastChangedFile}`
           : 'files changed';
-        void regenerateVersion(reason);
+        // regenerateVersion() rejects only under failOnError. The rejection
+        // is always caught here, so none can go unhandled (70i.31).
+        void regenerateVersion(reason).catch((error: unknown) => {
+          reportFailure(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        });
         changesPending = false;
         lastChangedFile = null;
       }
@@ -258,16 +287,29 @@ export async function startWatcher(
     });
   });
 
-  // Handle graceful shutdown
-  const cleanup = (): void => {
+  const stopWatching = (): void => {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
+      debounceTimer = null;
     }
+    changesPending = false;
     void watcher.close();
+  };
+
+  // Handle graceful shutdown
+  const cleanup = (): void => {
+    stopWatching();
     if (!silent) {
       console.log('\n👋 Watcher stopped');
     }
   };
 
-  return {cleanup, status: 'started'};
+  // 70i.31: a failed regeneration under failOnError stops the watcher — the
+  // timer cleared, chokidar closed — before the caller hears about it.
+  const failed = regenerationFailure.then((error) => {
+    stopWatching();
+    return error;
+  });
+
+  return {cleanup, failed, status: 'started'};
 }
