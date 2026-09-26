@@ -449,9 +449,9 @@ npm run dynamic-version:generate
 
 ### Git Operations
 - **Not a git repository**: Functions check with `isGitRepository()` first
-- **No commits yet**: `countCommitsBetween()` returns 0
-- **version-manager.json never changed**: Returns 0 commits (uses base version as-is)
-- **Detached HEAD**: `getCurrentBranch()` returns "HEAD"
+- **A failed git measurement is its own outcome, and it ends the command**: `countCommitsBetween()`, `findLastCommitWhereFieldChanged()`, `getCurrentBranch()` and `readFieldFromCommit()` return a result whose `git-failed` member carries the git command and its stderr, and the callers throw it. It never arrives as 0 commits, "never changed", "HEAD" or an absent field. `isFileTrackedByGit()` has the same member, and install's .gitignore guard fails closed on it: .gitignore is left alone, with a warning
+- **No commits yet, or package.json never committed**: `findLastCommitWhereFieldChanged()` reports `never-committed`, a real answer meaning 0 commits since (the base version as-is). The CLI still fails in a zero-commit repo, at `git describe` (version-manager-70i.29)
+- **Detached HEAD**: `getCurrentBranch()` reads "HEAD". An unborn branch reads its real name (it uses `git symbolic-ref --quiet --short HEAD`)
 - **Custom hooks path**: Code checks `git config core.hooksPath`
 
 ### Hook Installation
@@ -506,6 +506,7 @@ bun test <file>             # Run specific test file
   - `branch-suffix.test.ts` - The suffix end to end, through real commits
   - `merge-driver.test.ts` - Real git merges, and the knob that gates registration
   - `event-log-mode.test.ts` - Real git merges of `version.jsonl`, install, bump, the reader
+  - `git-measurement-failures.test.ts` - A real git failure per measurement (stub git from `tests/helpers/stub-git.ts`) ends the command, naming it
   - `generated-file-policy.test.ts` - What install writes in each mode
   - `cli-output.test.ts` - CLI output format tests
   - `config-migration.test.ts` - Config migration tests
