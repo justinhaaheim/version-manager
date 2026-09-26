@@ -89,6 +89,7 @@ npx @justinhaaheim/version-manager bump [options]
 - Increments the version in `package.json` based on the current computed version
 - Regenerates `dynamic-version.local.json`
 - Optionally commits the change
+- Does NOT need `version-manager.json`: an absent file gets the defaults, as in every other command, and bump creates none. It writes that file only to sync a named version or to migrate a legacy config. An invalid file still fails (70i.30)
 
 **Options:**
 - `[versions..]` (positional): Custom version names from the `versions` map to sync, e.g. `bump runtime`

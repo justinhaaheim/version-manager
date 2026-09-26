@@ -188,7 +188,9 @@ Without `--mode`, install reads the mode from `version-manager.json` as it alway
 npx @justinhaaheim/version-manager bump [options]
 ```
 
-Increments the version in `version-manager.json` based on the current computed version.
+Increments the version in `package.json`, starting from the current computed version. In `event-log` mode it appends a base event instead and does not touch `package.json` — see [Bumping](#bumping).
+
+`version-manager.json` is not required: without one, bump uses the defaults and creates none. bump writes that file only to sync a named version (`bump runtime`, which fails if `versions` has no `runtime`) or to migrate a legacy config.
 
 **Options:**
 
