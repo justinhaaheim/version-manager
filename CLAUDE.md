@@ -558,8 +558,8 @@ npx @justinhaaheim/version-manager bump --minor
 # Bump major version (0.1.11 → 1.0.0)
 npx @justinhaaheim/version-manager bump --major
 
-# Bump and update runtime version too
-npx @justinhaaheim/version-manager bump --minor --runtime
+# Bump and update runtime version too (a positional name from `versions`; there is no --runtime flag)
+npx @justinhaaheim/version-manager bump runtime --minor
 
 # Bump and auto-commit
 npx @justinhaaheim/version-manager bump --commit
