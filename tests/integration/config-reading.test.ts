@@ -3,6 +3,8 @@ import {afterEach, beforeEach, describe, expect, test} from 'bun:test';
 import {readVersion} from '../../src/version-reader';
 import {
   activateHooks,
+  setupBasicRepo,
+  setupDynamicFileModeRepo,
   setupEventLogModeRepo,
   setupPackageJsonModeRepo,
   setupRepoForInstall,
@@ -223,5 +225,70 @@ describe('a config holding only versionMode (70i.28)', () => {
 
     // Nothing to say about the config: it is valid.
     expect(result.stderr).not.toContain('version-manager.json');
+  }, 30000);
+});
+
+/** A package.json cut off mid-edit: present, and not JSON. */
+const CORRUPT_PACKAGE_JSON = '{"name": "test-package", "version": "0.1.0",\n';
+
+describe('a corrupt package.json is an error, not a missing one (70i.18.2, S5)', () => {
+  let repo: TestRepo;
+
+  beforeEach(() => {
+    repo = new TestRepo();
+  });
+
+  afterEach(() => {
+    repo.cleanup();
+  });
+
+  /** Failed, said the file is not JSON, and did not say "add a version". */
+  function expectCorruptPackageJson(result: CliResult): void {
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('package.json is not valid JSON');
+    expect(result.stderr).not.toContain('No version found in package.json');
+    expect(result.stderr).not.toContain('No package.json found');
+  }
+
+  test('generate says package.json is not valid JSON, not "no version found"', () => {
+    setupDynamicFileModeRepo(repo, '0.1.0', 'add-to-patch');
+    repo.writeFile('package.json', CORRUPT_PACKAGE_JSON);
+
+    expectCorruptPackageJson(repo.runCli(''));
+    expect(repo.fileExists('dynamic-version.local.json')).toBe(false);
+  }, 30000);
+
+  test('the pre-commit working-tree fallback says so too (package.json not in the index)', () => {
+    // readPreCommitBaseVersion() falls back to the working tree only when
+    // package.json has never been staged (D9). That fallback is where S5 was
+    // found: a corrupt file read as "No version found".
+    setupBasicRepo(repo);
+    repo.writeFile('package.json', CORRUPT_PACKAGE_JSON);
+    repo.writeFile(
+      'version-manager.json',
+      JSON.stringify({versionMode: 'package-json'}, null, 2) + '\n',
+    );
+
+    expectCorruptPackageJson(repo.runCli('--pre-commit'));
+    expect(repo.readFile('package.json')).toBe(CORRUPT_PACKAGE_JSON);
+  }, 30000);
+
+  test('install-scripts fails naming the file, and leaves it alone', () => {
+    setupDynamicFileModeRepo(repo, '0.1.0', 'add-to-patch');
+    repo.writeFile('package.json', CORRUPT_PACKAGE_JSON);
+
+    expectCorruptPackageJson(repo.runCli('install-scripts --force'));
+    expect(repo.readFile('package.json')).toBe(CORRUPT_PACKAGE_JSON);
+  }, 30000);
+
+  test('an ABSENT package.json is reported exactly as before', () => {
+    setupBasicRepo(repo);
+
+    const result = repo.runCli('');
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'No package.json found. This tool requires a package.json with a "version" field.',
+    );
   }, 30000);
 });

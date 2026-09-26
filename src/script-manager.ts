@@ -90,6 +90,17 @@ export function getConflictingScripts(packageJson: PackageJson): ScriptEntry[] {
   );
 }
 
+/**
+ * Read the working-tree package.json.
+ *
+ * @returns The parsed file, or null ONLY when package.json is absent
+ *   (version-manager-70i.18.2, S5; 70i.18 F8)
+ * @throws When package.json is present but cannot be read or is not valid
+ *   JSON, naming the file and the parser's complaint. It used to log and
+ *   return null too, so every caller reported a corrupt package.json as a
+ *   missing one — or as "No version found in package.json. Please add a
+ *   version field", the wrong instruction for the actual problem.
+ */
 export function readPackageJson(): PackageJson | null {
   const packageJsonPath = join(process.cwd(), 'package.json');
 
@@ -97,12 +108,19 @@ export function readPackageJson(): PackageJson | null {
     return null;
   }
 
+  let content: string;
   try {
-    const content = readFileSync(packageJsonPath, 'utf-8');
+    content = readFileSync(packageJsonPath, 'utf-8');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${packageJsonPath} could not be read: ${message}`);
+  }
+
+  try {
     return JSON.parse(content) as PackageJson;
   } catch (error) {
-    console.error('Failed to parse package.json:', error);
-    return null;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${packageJsonPath} is not valid JSON: ${message}`);
   }
 }
 
@@ -220,7 +238,9 @@ export function listDefaultScripts(includeLifecycleScripts = true): void {
 
 /**
  * Get the version from package.json
- * @returns The version string or null if not found
+ * @returns The version string, or null if package.json is absent or has no
+ *   version
+ * @throws If package.json is present but not valid JSON (70i.18.2, S5)
  */
 export function getPackageVersion(): string | null {
   const packageJson = readPackageJson();
@@ -235,7 +255,9 @@ export function getPackageVersion(): string | null {
 /**
  * Update the version in package.json
  * @param newVersion - The new version string
- * @returns True if successful, false otherwise
+ * @returns True if successful, false if package.json is absent or the write
+ *   failed
+ * @throws If package.json is present but not valid JSON (70i.18.2, S5)
  */
 export function updatePackageVersion(newVersion: string): boolean {
   const packageJson = readPackageJson();
@@ -274,7 +296,9 @@ export interface PreCommitBaseVersion {
  * @returns The version and where it came from, or null if package.json has no
  *   top-level string `version`. Null is "no version there"; a read that FAILS
  *   throws (critical rule 6).
- * @throws If git fails, or the staged package.json is not valid JSON
+ * @throws If git fails, or the staged package.json is not valid JSON, or —
+ *   on the working-tree fallback — the working-tree package.json is not
+ *   valid JSON (70i.18.2, S5)
  */
 export function readPreCommitBaseVersion(): PreCommitBaseVersion | null {
   const entry = readIndexEntry(PACKAGE_JSON);
