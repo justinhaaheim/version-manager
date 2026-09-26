@@ -4,12 +4,28 @@ import {execSync} from 'child_process';
 import {chmodSync, existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
-const POST_HOOK_NAMES = [
+/** The hooks dynamic-file mode installs. Exported for install --mode (70i.7 M3). */
+export const POST_HOOK_NAMES = [
   'post-checkout',
   'post-commit',
   'post-merge',
   'post-rewrite',
 ];
+
+/** Where every hook is installed; see getHuskyHooksPath(). */
+export const HUSKY_DIR_NAME = '.husky';
+
+/**
+ * Whether one line of a hook file is ours: the line install writes, and the
+ * line updateExistingHook() replaces. One definition, shared with the mode
+ * switch warning in src/install-mode.ts (version-manager-70i.7, M3).
+ */
+export function isVersionManagerHookLine(line: string): boolean {
+  return (
+    line.includes('bun run test:local') ||
+    line.includes('npx @justinhaaheim/version-manager')
+  );
+}
 
 /**
  * Detect which package manager to use based on lock files
@@ -145,7 +161,7 @@ function ensureHuskyInstalled(silent = false): void {
  * Always returns .husky/ - we no longer support .git/hooks
  */
 function getHuskyHooksPath(): string {
-  return join(process.cwd(), '.husky');
+  return join(process.cwd(), HUSKY_DIR_NAME);
 }
 
 /**
@@ -163,10 +179,7 @@ function updateExistingHook(
   // Find lines containing our command patterns
   const matchingLineIndices: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (
-      lines[i].includes('bun run test:local') ||
-      lines[i].includes('npx @justinhaaheim/version-manager')
-    ) {
+    if (isVersionManagerHookLine(lines[i])) {
       matchingLineIndices.push(i);
     }
   }

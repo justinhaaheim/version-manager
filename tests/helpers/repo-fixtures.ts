@@ -357,6 +357,48 @@ export function setupRepoForInstall(
 }
 
 /**
+ * setupRepoForInstall()'s repository WITHOUT a version-manager.json: one
+ * commit, package.json declaring husky, an untracked .gitignore and a
+ * pre-created .husky/. The state `install --mode` (version-manager-70i.7) is
+ * for — a project adopting a mode with nothing written by hand.
+ *
+ * @param config - Text to write as version-manager.json, committed like
+ *   setupRepoForInstall()'s, or null for no file at all
+ */
+export function setupRepoForModeInstall(
+  repo: TestRepo,
+  config: string | null = null,
+): void {
+  repo.initGit();
+  repo.writeFile('README.md', '# Test Repo\n');
+  repo.makeCommit('Initial commit');
+
+  repo.writeFile(
+    'package.json',
+    JSON.stringify(
+      {
+        devDependencies: {husky: '^9.1.7'},
+        name: 'test-package',
+        version: '0.1.0',
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  repo.runGit('add package.json');
+
+  if (config !== null) {
+    repo.writeFile('version-manager.json', config);
+    repo.runGit('add version-manager.json');
+  }
+
+  repo.makeCommit('Add package.json', false);
+
+  repo.writeFile('.gitignore', 'node_modules/\n');
+  repo.writeFile('.husky/.keep', '');
+}
+
+/**
  * Install git hooks into a fixture repo and make them executable by real git.
  * See setupPackageJsonModeRepo() for why the rewriting is necessary.
  */

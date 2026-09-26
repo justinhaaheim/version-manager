@@ -137,6 +137,128 @@ export function findTopLevelStringValueSpan(
 }
 
 /**
+ * Add a string property at the END of the root object, touching nothing else
+ * (version-manager-70i.7, M2).
+ *
+ * The new property copies the file's own layout: the whitespace that precedes
+ * the last top-level key, and the spacing around that key's colon. So a
+ * 4-space file gains a 4-space line, a tab-indented file a tab-indented one,
+ * and a single-line object stays on one line. An empty object gets a
+ * two-space line of its own.
+ *
+ * @param text - JSON text with an object at the root
+ * @param key - The property name to add
+ * @param value - The string value, JSON-escaped on the way in
+ * @returns The edited text
+ * @throws If the root is not an object, a string literal is unterminated, the
+ *   root object is never closed, or `key` is ALREADY a top-level property —
+ *   use replaceTopLevelStringValue() for that; adding a second copy would
+ *   leave JSON.parse reading whichever came last
+ */
+export function appendTopLevelStringProperty(
+  text: string,
+  key: string,
+  value: string,
+): string {
+  const open = skipWhitespace(text, 0);
+
+  if (text[open] !== '{') {
+    throw new Error('The JSON text does not have an object at its root');
+  }
+
+  let depth = 0;
+  let index = open;
+  let close: number | null = null;
+  // The '{' or ',' that precedes the top-level key seen most recently.
+  let lastDelimiter = open;
+  let lastKey: {
+    delimiter: number;
+    end: number;
+    start: number;
+    valueStart: number;
+  } | null = null;
+
+  while (index < text.length) {
+    const char = text[index];
+
+    if (char === '"') {
+      const literal = readStringLiteral(text, index);
+      const afterLiteral = skipWhitespace(text, literal.end);
+
+      if (depth === 1 && text[afterLiteral] === ':') {
+        if (literal.value === key) {
+          throw new Error(
+            `"${key}" is already a top-level property; replace its value instead of adding another`,
+          );
+        }
+
+        lastKey = {
+          delimiter: lastDelimiter,
+          end: literal.end,
+          start: index,
+          valueStart: skipWhitespace(text, afterLiteral + 1),
+        };
+      }
+
+      index = literal.end;
+      continue;
+    }
+
+    if (char === '{' || char === '[') {
+      depth += 1;
+    } else if (char === '}' || char === ']') {
+      depth -= 1;
+      if (depth === 0) {
+        close = index;
+        break;
+      }
+    } else if (char === ',' && depth === 1) {
+      lastDelimiter = index;
+    }
+
+    index += 1;
+  }
+
+  if (close === null) {
+    throw new Error(
+      'The JSON text has an object at its root that never closes',
+    );
+  }
+
+  const property = (leading: string, colon: string): string =>
+    `${leading}${JSON.stringify(key)}${colon}${JSON.stringify(value)}`;
+
+  if (lastKey === null) {
+    return (
+      text.slice(0, open + 1) +
+      property('\n  ', ': ') +
+      '\n' +
+      text.slice(close)
+    );
+  }
+
+  // Everything between the preceding '{' or ',' and the last key: the
+  // newline-plus-indent of a multi-line file, or the space of a one-line one.
+  const precedingWhitespace = text.slice(lastKey.delimiter + 1, lastKey.start);
+  const leading = precedingWhitespace === '' ? ' ' : precedingWhitespace;
+  const colon = text.slice(lastKey.end, lastKey.valueStart);
+
+  // Directly after the last value, so the whitespace before the closing brace
+  // (and whatever follows it) stays exactly where it was.
+  let endOfLastValue = close;
+  while (endOfLastValue > open && /\s/.test(text[endOfLastValue - 1])) {
+    endOfLastValue -= 1;
+  }
+
+  return (
+    text.slice(0, endOfLastValue) +
+    ',' +
+    property(leading, colon) +
+    text.slice(endOfLastValue)
+  );
+}
+
+/**
  * Replace the value of a top-level string property, touching nothing else.
  *
  * @param text - JSON text (an object at the root)

@@ -66,6 +66,22 @@ const LIFECYCLE_SCRIPTS: ScriptEntry[] = [
   },
 ];
 
+/**
+ * The lifecycle scripts' names. Exported for the mode switch warning in
+ * src/install-mode.ts (version-manager-70i.7, M3).
+ */
+export const LIFECYCLE_SCRIPT_NAMES = LIFECYCLE_SCRIPTS.map(
+  (script) => script.name,
+);
+
+/**
+ * Whether a script runs version-manager: the same test
+ * addScriptsToPackageJson() applies to an existing `prepare`.
+ */
+export function isVersionManagerScript(command: string): boolean {
+  return command.includes('@justinhaaheim/version-manager');
+}
+
 export function hasExistingDynamicVersionScripts(
   packageJson: PackageJson,
 ): boolean {
@@ -185,7 +201,7 @@ export function addScriptsToPackageJson(
     // Special handling for 'prepare' script - append instead of replace
     if (script.name === 'prepare' && existingScript) {
       // Check if our command is already in the existing prepare script
-      if (!existingScript.includes('@justinhaaheim/version-manager')) {
+      if (!isVersionManagerScript(existingScript)) {
         // Append our command to the existing prepare script
         packageJson.scripts[script.name] =
           `${existingScript} && ${script.command}`;

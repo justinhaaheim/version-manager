@@ -25,6 +25,12 @@ import {
 import {detectRunCommand, installGitHooks} from './git-hooks-manager';
 import {isFileTrackedByGit, requireCurrentBranch} from './git-utils';
 import {
+  describeModeSwitchLeftovers,
+  describeRecordedVersionMode,
+  formatModeSwitchWarning,
+  recordVersionMode,
+} from './install-mode';
+import {
   MERGE_DRIVER_ATTRIBUTE,
   registerMergeDriver,
   runMergeDriver,
@@ -42,7 +48,11 @@ import {
   readPackageJson,
   writePreCommitVersion,
 } from './script-manager';
-import {type DynamicVersion} from './types';
+import {
+  type DynamicVersion,
+  type VersionMode,
+  VersionModeSchema,
+} from './types';
 import {
   bumpEventLogVersion,
   type BumpType,
@@ -711,6 +721,49 @@ async function installCommand(
   }
 }
 
+/**
+ * `install --mode <m>` (version-manager-70i.7): record the mode, THEN install
+ * (M2), then say what the previous mode left behind (M3).
+ *
+ * The record step runs before installCommand() reads the mode, so the install
+ * that follows is exactly the one a file that always said `mode` would get. A
+ * version-manager.json that is present but invalid throws out of
+ * recordVersionMode() before anything is written or installed.
+ *
+ * The leftovers are measured right after the record step, before install
+ * runs, and printed AFTER install, even if install fails: by then the mode has
+ * been recorded either way, and the warning is what tells the author there is
+ * clean-up to do. It is a warning, so --silent does not hide it.
+ */
+async function installWithMode(
+  mode: VersionMode,
+  silent: boolean,
+  install: () => Promise<void>,
+): Promise<void> {
+  const recorded = recordVersionMode(
+    join(process.cwd(), 'version-manager.json'),
+    mode,
+  );
+
+  if (!silent) {
+    console.log(describeRecordedVersionMode(recorded));
+  }
+
+  const warning = formatModeSwitchWarning(
+    recorded.previousMode,
+    mode,
+    describeModeSwitchLeftovers(recorded.previousMode, mode, process.cwd()),
+  );
+
+  try {
+    await install();
+  } finally {
+    if (warning !== null) {
+      console.warn(`\n${warning}`);
+    }
+  }
+}
+
 // Install scripts command handler
 async function installScriptsCommand(force: boolean): Promise<void> {
   const projectPackageJson = readPackageJson();
@@ -1061,19 +1114,34 @@ async function main() {
               describe: 'Increment patch version with each commit',
               type: 'boolean' as const,
             },
+            // M1 (version-manager-70i.7): no default. Without --mode, install
+            // behaves exactly as it always has.
+            mode: {
+              choices: VersionModeSchema.options,
+              describe:
+                'Record this versionMode in version-manager.json, then install for it',
+              type: 'string' as const,
+            },
           }),
         async (args) => {
           const format = getFormat(args.silent, args.compact, args.verbose);
-          await installCommand(
-            args['increment-patch'],
-            resolveOutputPathOption(args.output),
-            format,
-            args['non-interactive'],
-            !args.fail,
-            args.force,
-            args.types,
-            args['git-hook'],
-          );
+          const install = (): Promise<void> =>
+            installCommand(
+              args['increment-patch'],
+              resolveOutputPathOption(args.output),
+              format,
+              args['non-interactive'],
+              !args.fail,
+              args.force,
+              args.types,
+              args['git-hook'],
+            );
+
+          if (args.mode === undefined) {
+            await install();
+          } else {
+            await installWithMode(args.mode, format === 'silent', install);
+          }
         },
       )
       .command(

@@ -101,32 +101,19 @@ export type VersionManagerConfigRead =
     };
 
 /**
- * Read version-manager.json configuration with Zod validation and migration.
+ * Parse version-manager.json TEXT exactly as readVersionManagerConfig() does,
+ * without reading a file. `install --mode` (version-manager-70i.7, M2) checks
+ * the text it is about to write through this, so the text is judged by the
+ * same parser, schemas and migration every command uses.
  *
- * Never throws and never warns: it reports. Commands go through
- * loadVersionManagerConfig(), which turns "invalid" into a thrown error.
- *
- * @param configPath - Path to version-manager.json
- * @returns absent, ok (with whether the legacy shape was migrated), or invalid
- *   with a reason naming the file
+ * @param content - The file's text
+ * @param configPath - The path to name in a reason
+ * @returns ok (with whether the legacy shape was migrated) or invalid
  */
-export function readVersionManagerConfig(
+export function parseVersionManagerConfigText(
+  content: string,
   configPath: string,
-): VersionManagerConfigRead {
-  if (!existsSync(configPath)) {
-    return {outcome: 'absent'};
-  }
-
-  let content: string;
-  try {
-    content = readFileSync(configPath, 'utf-8');
-  } catch (error) {
-    return {
-      outcome: 'invalid',
-      reason: `${configPath} could not be read: ${errorMessage(error)}`,
-    };
-  }
-
+): Exclude<VersionManagerConfigRead, {outcome: 'absent'}> {
   let json: unknown;
   try {
     json = JSON.parse(content);
@@ -159,6 +146,36 @@ export function readVersionManagerConfig(
     outcome: 'invalid',
     reason: `${configPath} is not a valid version-manager config:\n${prettifyError(newResult.error)}`,
   };
+}
+
+/**
+ * Read version-manager.json configuration with Zod validation and migration.
+ *
+ * Never throws and never warns: it reports. Commands go through
+ * loadVersionManagerConfig(), which turns "invalid" into a thrown error.
+ *
+ * @param configPath - Path to version-manager.json
+ * @returns absent, ok (with whether the legacy shape was migrated), or invalid
+ *   with a reason naming the file
+ */
+export function readVersionManagerConfig(
+  configPath: string,
+): VersionManagerConfigRead {
+  if (!existsSync(configPath)) {
+    return {outcome: 'absent'};
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(configPath, 'utf-8');
+  } catch (error) {
+    return {
+      outcome: 'invalid',
+      reason: `${configPath} could not be read: ${errorMessage(error)}`,
+    };
+  }
+
+  return parseVersionManagerConfigText(content, configPath);
 }
 
 /**
