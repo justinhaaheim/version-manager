@@ -521,6 +521,7 @@ bun test <file>             # Run specific test file
   - `generated-file-policy.test.ts` - What install writes in each mode
   - `install-mode.test.ts` - `install --mode`: the config it writes, the refusals, and the mode-switch warning
   - `install-silent.test.ts` - `install --silent` adds the same scripts as a non-silent install and prints nothing on stdout
+  - `bump-command.test.ts` - What bump commits, tags and pushes, and the files its tip names
   - `cli-output.test.ts` - CLI output format tests
   - `config-migration.test.ts` - Config migration tests
   - `git-hooks.test.ts` - Hook installation tests (may be flaky)

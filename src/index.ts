@@ -114,8 +114,11 @@ const globalOptions = {
     describe: 'Suppress console output (informational messages only)',
     type: 'boolean' as const,
   },
+  // No short alias (version-manager-70i.34). `-t` belongs to bump's --tag, as
+  // the README and CLAUDE.md document. While both options declared it, yargs
+  // made them one option, so --tag inherited this default of true and every
+  // `bump --commit` created (and with --push, pushed) a tag nobody asked for.
   types: {
-    alias: 't',
     default: true,
     describe:
       'Generate TypeScript definition file with explicit version types (use --no-types to disable)',
