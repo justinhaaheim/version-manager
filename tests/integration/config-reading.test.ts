@@ -1,6 +1,8 @@
 import {afterEach, beforeEach, describe, expect, test} from 'bun:test';
 
+import {bumpVersion} from '../../src/version-generator';
 import {readVersion} from '../../src/version-reader';
+import {inDirectory} from '../helpers/in-directory';
 import {
   activateHooks,
   setupBasicRepo,
@@ -8,6 +10,7 @@ import {
   setupEventLogModeRepo,
   setupPackageJsonModeRepo,
   setupRepoForInstall,
+  setupRepoForModeInstall,
 } from '../helpers/repo-fixtures';
 import {type CliResult, TestRepo} from '../helpers/test-repo';
 
@@ -72,9 +75,11 @@ describe('a broken version-manager.json ends every command (70i.18.2, S4)', () =
         expect(repo.fileExists('.husky/post-commit')).toBe(false);
       }
 
-      // Not the old wrong message for bump, either.
-      expect(repo.runCli('bump').stderr).not.toContain(
-        'No version-manager.json found',
+      // bump reports it as BROKEN. It used to say "No version-manager.json
+      // found" (70i.18.2); since 70i.30 an absent file gets the defaults, so
+      // being reported as broken is what keeps it from being treated as absent.
+      expect(repo.runCli('bump').stderr).toContain(
+        'A broken config is never replaced by the defaults',
       );
     }, 60000);
   }
@@ -164,6 +169,82 @@ describe('a broken version-manager.json ends every command (70i.18.2, S4)', () =
       repo.readFile('dynamic-version.local.json'),
     ) as {dynamicVersion: string};
     expect(generated.dynamicVersion).toBe('0.1.0+1');
+  }, 30000);
+});
+
+describe('bump with an ABSENT version-manager.json gets the defaults (70i.30)', () => {
+  let repo: TestRepo;
+
+  beforeEach(() => {
+    repo = new TestRepo();
+  });
+
+  afterEach(() => {
+    repo.cleanup();
+  });
+
+  test('install then bump succeeds, bumps package.json, and creates no version-manager.json', () => {
+    // The README flow in a project that never wrote a config. Plain install
+    // creates no version-manager.json (70i.26), and bump used to refuse to run
+    // without one: "No version-manager.json found. Please run install command
+    // first."
+    setupRepoForModeInstall(repo);
+
+    expect(repo.runCli('install --non-interactive').exitCode).toBe(0);
+    expect(repo.fileExists('version-manager.json')).toBe(false);
+
+    const result = repo.runCli('bump');
+
+    expect(result.stderr).not.toContain('No version-manager.json found');
+    expect(result.exitCode).toBe(0);
+    // The defaults (append-commits, dynamic-file). No commit since
+    // package.json's version was set, so 0.1.0 is current and patch gives 0.1.1.
+    expect(repo.readPackageJson().version).toBe('0.1.1');
+    expect(repo.fileExists('version-manager.json')).toBe(false);
+  }, 60000);
+
+  test('bump runtime fails naming the missing version, and writes nothing', () => {
+    // The defaults carry no named versions, so syncing one fails on its own,
+    // with the message a config that lacks it gets. It must not create a
+    // version-manager.json to hold the version it was asked to sync.
+    setupRepoForModeInstall(repo);
+    const packageJsonBefore = repo.readFile('package.json');
+
+    const result = repo.runCli('bump runtime');
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('Version "runtime" not found');
+    expect(result.stderr).not.toContain('No version-manager.json found');
+    expect(repo.readFile('package.json')).toBe(packageJsonBefore);
+    expect(repo.fileExists('version-manager.json')).toBe(false);
+  }, 30000);
+
+  test('bumpVersion() itself still throws on an INVALID config, and bumps nothing', async () => {
+    // Through the CLI, an invalid config never reaches bumpVersion():
+    // bumpCommand() calls getVersionMode() first, and that throws. So the
+    // 70i.18.2 CLI tests above stay green even if bumpVersion() gives an
+    // invalid config the defaults. This test does not. bumpVersion() loads the
+    // config twice before it writes package.json (its own load, then
+    // generateFileBasedVersion()'s), so it fails only when BOTH stop throwing:
+    // either one alone still rejects here, with the same message.
+    setupRepoForModeInstall(
+      repo,
+      '{"versionMode": "package-json", "brnachSuffix": {}}\n',
+    );
+    const packageJsonBefore = repo.readFile('package.json');
+
+    // null means bumpVersion() resolved: it bumped with an invalid config.
+    let failure: string | null = null;
+    try {
+      await inDirectory(repo.getPath(), () => bumpVersion('patch', [], true));
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(failure).toMatch(
+      /brnachSuffix[\s\S]*never replaced by the defaults/,
+    );
+    expect(repo.readFile('package.json')).toBe(packageJsonBefore);
   }, 30000);
 });
 

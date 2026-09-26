@@ -1150,19 +1150,17 @@ export async function bumpVersion(
     );
   }
 
-  // Read config. Absent and invalid are different failures with different
-  // fixes, so they get different messages (70i.18.2, S4): an invalid file
-  // used to be reported as "No version-manager.json found".
-  const read = readVersionManagerConfig(configPath);
-  if (read.outcome === 'absent') {
-    throw new Error(
-      'No version-manager.json found. Please run install command first.',
-    );
-  }
-  if (read.outcome === 'invalid') {
-    throw new Error(invalidConfigMessage(read.reason));
-  }
-  const {config, migrated} = read;
+  // Read config exactly as every other command does (version-manager-70i.30):
+  // an ABSENT file means the defaults, because every field is optional and
+  // plain `install` never creates one; an INVALID file still throws (70i.18.2,
+  // S4 — a broken config is never replaced by the defaults). bump used to
+  // refuse an absent file with "No version-manager.json found. Please run
+  // install command first.", which sent the user back to the install they had
+  // just run.
+  //
+  // An absent file is not created below: the defaults carry no `versions`, so
+  // naming one fails the check that follows, and they are never `migrated`.
+  const {config, migrated} = loadVersionManagerConfig(configPath);
 
   // Validate custom version names exist in config
   for (const versionName of customVersionsToUpdate) {
