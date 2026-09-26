@@ -9,6 +9,7 @@ import type {
 
 import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
+import {prettifyError} from 'zod';
 
 import {
   applyBranchSuffix,
@@ -41,6 +42,7 @@ import {
 } from './git-utils';
 import {getPackageVersion, readPreCommitBaseVersion} from './script-manager';
 import {
+  DEFAULT_VERSION_CALCULATION_MODE,
   LegacyVersionManagerConfigSchema,
   VersionManagerConfigSchema,
 } from './types';
@@ -68,47 +70,95 @@ function migrateLegacyConfig(
   };
 }
 
+/** The one wording for a config that ends a command (70i.18 F7). */
+function invalidConfigMessage(reason: string): string {
+  return `${reason}\nFix version-manager.json and run the command again. A broken config is never replaced by the defaults.`;
+}
+
+/** An unknown thrown value, as readable text. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
- * Read version-manager.json configuration with Zod validation and migration
- * @param configPath - Path to version-manager.json
- * @returns Object with config (or null if not found), and whether migration occurred
+ * What reading version-manager.json found (version-manager-70i.18.2, S4;
+ * 70i.18 F7).
+ *
+ * THREE DIFFERENT FACTS, three members. "absent" is a documented, legal state
+ * and is the only one that gets the defaults. "invalid" — the file is there
+ * but cannot be read, is not JSON, or fails the schema — used to be reported
+ * with a console.warn and then ALSO read as "no config", so a typo'd knob ran
+ * the command on the defaults: in package-json mode a typo silently switched
+ * the project back to dynamic-file mode.
  */
-function readVersionManagerConfig(configPath: string): {
-  config: VersionManagerConfig | null;
-  migrated: boolean;
-} {
-  try {
-    if (!existsSync(configPath)) {
-      return {config: null, migrated: false};
-    }
+export type VersionManagerConfigRead =
+  | {outcome: 'absent'}
+  | {config: VersionManagerConfig; migrated: boolean; outcome: 'ok'}
+  | {
+      outcome: 'invalid';
+      /** Names the file and what the parser or the schema said, readably. */
+      reason: string;
+    };
 
-    const content = readFileSync(configPath, 'utf-8');
-    const json: unknown = JSON.parse(content);
-
-    // Try parsing with new schema first
-    const newResult = VersionManagerConfigSchema.safeParse(json);
-    if (newResult.success) {
-      return {config: newResult.data, migrated: false};
-    }
-
-    // Try parsing with legacy schema
-    const legacyResult = LegacyVersionManagerConfigSchema.safeParse(json);
-    if (legacyResult.success) {
-      // Migrate legacy config to new format
-      const migratedConfig = migrateLegacyConfig(legacyResult.data);
-      return {config: migratedConfig, migrated: true};
-    }
-
-    // Neither schema worked - invalid config
-    console.warn(
-      `⚠️  Invalid version-manager.json format:`,
-      newResult.error.format(),
-    );
-    return {config: null, migrated: false};
-  } catch (error) {
-    console.warn(`⚠️  Failed to read version-manager.json:`, error);
-    return {config: null, migrated: false};
+/**
+ * Read version-manager.json configuration with Zod validation and migration.
+ *
+ * Never throws and never warns: it reports. Commands go through
+ * loadVersionManagerConfig(), which turns "invalid" into a thrown error.
+ *
+ * @param configPath - Path to version-manager.json
+ * @returns absent, ok (with whether the legacy shape was migrated), or invalid
+ *   with a reason naming the file
+ */
+export function readVersionManagerConfig(
+  configPath: string,
+): VersionManagerConfigRead {
+  if (!existsSync(configPath)) {
+    return {outcome: 'absent'};
   }
+
+  let content: string;
+  try {
+    content = readFileSync(configPath, 'utf-8');
+  } catch (error) {
+    return {
+      outcome: 'invalid',
+      reason: `${configPath} could not be read: ${errorMessage(error)}`,
+    };
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(content);
+  } catch (error) {
+    return {
+      outcome: 'invalid',
+      reason: `${configPath} is not valid JSON: ${errorMessage(error)}`,
+    };
+  }
+
+  // Try parsing with new schema first
+  const newResult = VersionManagerConfigSchema.safeParse(json);
+  if (newResult.success) {
+    return {config: newResult.data, migrated: false, outcome: 'ok'};
+  }
+
+  // Try parsing with legacy schema. The migration is unchanged by 70i.18.2.
+  const legacyResult = LegacyVersionManagerConfigSchema.safeParse(json);
+  if (legacyResult.success) {
+    return {
+      config: migrateLegacyConfig(legacyResult.data),
+      migrated: true,
+      outcome: 'ok',
+    };
+  }
+
+  // Neither schema accepted it. The CURRENT schema's complaint is the one to
+  // show: the legacy shape is only a migration path.
+  return {
+    outcome: 'invalid',
+    reason: `${configPath} is not a valid version-manager config:\n${prettifyError(newResult.error)}`,
+  };
 }
 
 /**
@@ -146,10 +196,33 @@ function getDefaultVersionManagerConfig(): VersionManagerConfig {
   return {
     branchSuffix: {enabled: false, mainBranches: ['main', 'master']},
     mergeDriver: {enabled: false},
-    versionCalculationMode: 'append-commits',
+    versionCalculationMode: DEFAULT_VERSION_CALCULATION_MODE,
     versionMode: 'dynamic-file',
     versions: {},
   };
+}
+
+/**
+ * Load the config a command runs with (70i.18 F7).
+ *
+ * @returns The parsed config, or the defaults when the file is ABSENT
+ * @throws When the file is present but invalid. A broken config is never
+ *   replaced by the defaults: that is how a typo used to change the mode.
+ */
+function loadVersionManagerConfig(configPath: string): {
+  config: VersionManagerConfig;
+  migrated: boolean;
+} {
+  const read = readVersionManagerConfig(configPath);
+
+  switch (read.outcome) {
+    case 'absent':
+      return {config: getDefaultVersionManagerConfig(), migrated: false};
+    case 'ok':
+      return {config: read.config, migrated: read.migrated};
+    case 'invalid':
+      throw new Error(invalidConfigMessage(read.reason));
+  }
 }
 
 /**
@@ -388,12 +461,10 @@ export async function generateFileBasedVersion(
     );
   }
 
-  // Read config from version-manager.json, or use defaults if not found
-  // When config file doesn't exist, falls back to default values:
-  // - versions: {} (no custom versions)
-  // - versionCalculationMode: "append-commits" (explicit, non-magic behavior)
-  const {config: rawConfig, migrated} = readVersionManagerConfig(configPath);
-  const config = rawConfig ?? getDefaultVersionManagerConfig();
+  // Read config from version-manager.json. An ABSENT file gets the defaults
+  // (versions: {}, versionCalculationMode: "append-commits"); a present but
+  // invalid one ends the command (70i.18.2, S4).
+  const {config, migrated} = loadVersionManagerConfig(configPath);
 
   // Validate version names
   if (config.versions) {
@@ -612,9 +683,9 @@ export async function generatePreCommitVersionData(
       ? '⚠️  package.json is not in the git index, so the version was read from the working tree. Run `git add package.json` to track it.'
       : null;
 
-  // Read config
-  const {config: rawConfig, migrated} = readVersionManagerConfig(configPath);
-  const config = rawConfig ?? getDefaultVersionManagerConfig();
+  // Read config. An invalid one aborts the commit (70i.18.2, S4) rather than
+  // running the hook on the defaults, i.e. in dynamic-file mode.
+  const {config, migrated} = loadVersionManagerConfig(configPath);
 
   if (config.versions) {
     validateVersionNames(config.versions);
@@ -741,8 +812,8 @@ export async function generateEventLogVersionData(
   const gitDescribe = await getGitDescribe();
   const dirty = gitDescribe.includes('-dirty');
 
-  const {config: rawConfig} = readVersionManagerConfig(configPath);
-  const config = rawConfig ?? getDefaultVersionManagerConfig();
+  // An invalid config ends the command (70i.18.2, S4).
+  const {config} = loadVersionManagerConfig(configPath);
 
   if (config.versions) {
     validateVersionNames(config.versions);
@@ -875,26 +946,30 @@ export async function generateVersionDataForMode(
 
 /**
  * Read the versionMode from version-manager.json config.
- * Returns 'dynamic-file' if config is missing or versionMode is not set.
+ *
+ * @returns 'dynamic-file' when the file is ABSENT or does not set versionMode
+ * @throws When the file is present but invalid (70i.18.2, S4). It used to
+ *   return 'dynamic-file' then too, so a typo in a package-json or event-log
+ *   project silently ran every command in dynamic-file mode.
  */
 export function getVersionMode(): VersionMode {
   const configPath = join(process.cwd(), 'version-manager.json');
-  const {config} = readVersionManagerConfig(configPath);
-  return config?.versionMode ?? 'dynamic-file';
+  return loadVersionManagerConfig(configPath).config.versionMode;
 }
 
 /**
  * Read the merge-driver knob from version-manager.json (70i.24).
  *
- * OFF unless the config says otherwise — including when there is no config at
- * all and when the config could not be parsed. That direction is deliberate:
- * registering the driver is what creates the 70i.22 hazard, so an unreadable
- * config must never be the reason a repository ends up with one.
+ * OFF unless the config says otherwise, including when there is no config at
+ * all. A config that is present but cannot be parsed THROWS (70i.18.2, S4):
+ * it used to read as off, which hid the typo. Neither answer registers a
+ * driver, so the 70i.22 hazard stays opt-in.
+ *
+ * @throws When version-manager.json is present but invalid
  */
 export function isMergeDriverEnabled(): boolean {
   const configPath = join(process.cwd(), 'version-manager.json');
-  const {config} = readVersionManagerConfig(configPath);
-  return config?.mergeDriver.enabled ?? false;
+  return loadVersionManagerConfig(configPath).config.mergeDriver.enabled;
 }
 
 /**
@@ -1080,14 +1155,19 @@ export async function bumpVersion(
     );
   }
 
-  // Read config
-  const {config: rawConfig, migrated} = readVersionManagerConfig(configPath);
-  if (!rawConfig) {
+  // Read config. Absent and invalid are different failures with different
+  // fixes, so they get different messages (70i.18.2, S4): an invalid file
+  // used to be reported as "No version-manager.json found".
+  const read = readVersionManagerConfig(configPath);
+  if (read.outcome === 'absent') {
     throw new Error(
       'No version-manager.json found. Please run install command first.',
     );
   }
-  const config = rawConfig;
+  if (read.outcome === 'invalid') {
+    throw new Error(invalidConfigMessage(read.reason));
+  }
+  const {config, migrated} = read;
 
   // Validate custom version names exist in config
   for (const versionName of customVersionsToUpdate) {

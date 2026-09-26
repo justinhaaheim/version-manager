@@ -213,8 +213,10 @@ describe('the registration constants', () => {
  * The knob's schema half (version-manager-70i.24). The gate in installCommand
  * is only as good as the value it reads, and the config schema is .strict():
  * an undeclared `mergeDriver` field would make every config carrying the knob
- * fail to parse, which readVersionManagerConfig() reports as "no config" —
- * so the knob would silently do nothing at all.
+ * fail to parse. Since version-manager-70i.18.2 that ends every command with
+ * an error naming version-manager.json (it used to read as "no config", so the
+ * knob silently did nothing); either way the knob would be unusable, which is
+ * what these tests guard.
  */
 describe('the mergeDriver config knob', () => {
   const baseConfig = {versionCalculationMode: 'add-to-patch'} as const;
