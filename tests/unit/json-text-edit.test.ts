@@ -1,9 +1,64 @@
 import {describe, expect, test} from 'bun:test';
 
 import {
+  appendTopLevelStringProperty,
   findTopLevelStringValueSpan,
   replaceTopLevelStringValue,
 } from '../../src/json-text-edit';
+
+/**
+ * install --mode (version-manager-70i.7, M2) adds versionMode to a config
+ * that lacks it without reformatting anything else.
+ */
+describe('appendTopLevelStringProperty', () => {
+  test('copies a 4-space layout and appends after a nested object', () => {
+    const text =
+      '{\n    "a": "x",\n    "nested": {\n        "k": "v"\n    }\n}\n';
+
+    expect(appendTopLevelStringProperty(text, 'mode', 'm')).toBe(
+      '{\n    "a": "x",\n    "nested": {\n        "k": "v"\n    },\n    "mode": "m"\n}\n',
+    );
+  });
+
+  test('copies tabs and the colon spacing of the last key', () => {
+    const text = '{\n\t"a" :  1,\n\t"b" :  [1, 2]\n}';
+
+    expect(appendTopLevelStringProperty(text, 'mode', 'm')).toBe(
+      '{\n\t"a" :  1,\n\t"b" :  [1, 2],\n\t"mode" :  "m"\n}',
+    );
+  });
+
+  test('keeps a one-line object on one line', () => {
+    expect(appendTopLevelStringProperty('{"a": 1}', 'mode', 'm')).toBe(
+      '{"a": 1, "mode": "m"}',
+    );
+  });
+
+  test('gives an empty object a line of its own', () => {
+    expect(appendTopLevelStringProperty('{}\n', 'mode', 'm')).toBe(
+      '{\n  "mode": "m"\n}\n',
+    );
+  });
+
+  test('a nested key of the same name is not the top-level one', () => {
+    const text = '{\n  "versions": {"mode": "inner"}\n}\n';
+    const edited = appendTopLevelStringProperty(text, 'mode', 'm');
+
+    expect(JSON.parse(edited)).toEqual({mode: 'm', versions: {mode: 'inner'}});
+  });
+
+  test('refuses to add a second top-level copy of the key', () => {
+    expect(() =>
+      appendTopLevelStringProperty('{"mode": "a"}', 'mode', 'b'),
+    ).toThrow('already a top-level property');
+  });
+
+  test('refuses text whose root is not an object', () => {
+    expect(() => appendTopLevelStringProperty('[1]', 'mode', 'b')).toThrow(
+      'does not have an object at its root',
+    );
+  });
+});
 
 /**
  * Unit tests for the surgical JSON editor behind version-manager-70i.3 / D9.
