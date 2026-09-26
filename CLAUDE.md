@@ -313,7 +313,7 @@ docs/
 - **`branchSuffix`** — off by default. Adds a semver prerelease naming the branch (`0.32.3-feat-x.3`) on branches that are not in `mainBranches`. While it is on, **version-manager owns the prerelease segment**: every computation strips whatever prerelease it finds and re-applies its own, so a hand-authored `1.0.0-beta.1` is discarded. That is what stops the suffix compounding when it is committed and read back in `package-json` mode. See "Branch Name Suffix (opt-in)" in the README.
 - **`mergeDriver`** — off by default, and it needs `versionMode: 'package-json'` as well. Registers a git merge driver that resolves `package.json` version conflicts to OURS. It is off by default because a registered driver whose *command* cannot run turns a merge into a conflict with no markers in it, which an author can stage away and lose the other side. See "The package.json merge driver" in the README.
 
-When you add a knob: declare it in `VersionManagerConfigSchema` (the schema is `.strict()`, so an undeclared field makes the whole config fail to parse and silently read as absent), give it a Zod default, add it to both config literals in `version-generator.ts`, and default it to the safe side.
+When you add a knob: declare it in `VersionManagerConfigSchema` (the schema is `.strict()`, so an undeclared field makes the whole config fail to parse, and since 70i.18.2 that fails every command), give it a Zod default, add it to both config literals in `version-generator.ts`, and default it to the safe side.
 
 ## Core Data Structures
 
@@ -329,7 +329,7 @@ When you add a knob: declare it in `VersionManagerConfigSchema` (the schema is `
 }
 ```
 - **Committed to git** - Configuration for the calculation mode, the version mode and the knobs
-- The schema is `.strict()`: an unknown field makes the whole file fail the current schema
+- The schema is `.strict()`: an unknown field makes the whole file fail the current schema, and every command then fails naming the file (70i.18.2)
 - Every field above is optional in the file; the Zod defaults fill in what is missing
 - The legacy shape — a top-level `runtimeVersion` — is still accepted by `LegacyVersionManagerConfigSchema`, migrated to `versions.runtime`, and rewritten to disk with a message. It is NOT rejected; it is migrated
 - Base version is stored in the standard `package.json` version field
@@ -462,14 +462,15 @@ npm run dynamic-version:generate
 
 ### Version Calculation
 - **No version-manager.json**: The Zod defaults apply — `append-commits`, `dynamic-file`, both knobs off. The base version still comes from `package.json`
-- **Invalid calculation mode**: Falls back to "add-to-patch"
+- **Invalid calculation mode**: The config schema rejects it, so the command fails naming version-manager.json (70i.18.2). It never reaches the calculation
 - **Invalid semver in base**: Returns base version as-is (no calculation)
 - **buildNumber**: Always generated from the clock, in the iOS-compatible timestamp format. Nothing reads a `BUILD_NUMBER` environment variable
 
 ### File Operations
 - **Missing .gitignore**: Prompts user to add `*.local.json`
 - **Missing version-manager.json**: Nothing is created and nothing is asked; the defaults are used
-- **Corrupted JSON**: The config is reported as unreadable and the defaults are used, which means a typo'd knob reads as off. Check the warning
+- **Broken version-manager.json** (not JSON, an unknown field, a value the schema rejects): every command fails with an error naming the file and the problem, including the pre-commit hook, which aborts the commit. It is never replaced by the defaults (70i.18.2, S4): that used to turn a typo in a `package-json` or `event-log` project into `dynamic-file` mode. `readVersionManagerConfig()` returns `absent | ok | invalid`; only `absent` gets the defaults. `--no-fail` still exits 0 outside the pre-commit path
+- **Broken package.json** (present but not valid JSON): the command fails saying so (70i.18.2, S5). `readPackageJson()` returns null only when the file is absent. In `package-json` mode the pre-commit hook reads its base version from the git index, not through `readPackageJson()`, so this does not change how that hook treats a mid-edit working-tree file (except on the fallback where package.json has never been staged). `event-log` mode and `readVersion()` read the working-tree package.json, so there a corrupt one fails the command
 - **Output path doesn't exist**: Parent directory must exist (not created automatically)
 
 ## Module Organization
