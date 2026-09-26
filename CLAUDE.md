@@ -122,6 +122,8 @@ npx @justinhaaheim/version-manager watch [options]
 - Watches for file changes and auto-regenerates version file
 - Alternative to Metro plugin for non-React Native projects
 - Respects .gitignore patterns
+- Follows the same write policy as every other command (`shouldWriteGeneratedFiles()`). In `package-json` and `event-log` mode, without an explicit `--output`, it prints one message saying where the version lives, starts nothing, and exits 0. With an explicit `--output` it watches and writes that mode's version, derived the same way the CLI derives it (`event-log` mode: from `version.jsonl`)
+- Re-reads `versionMode` on every regeneration: after a switch to a mode with no generated file, a regeneration writes nothing and says so
 
 **What it watches:**
 - `.git/HEAD` and `.git/refs/**` - Git state changes (commits, checkouts, merges)
@@ -191,6 +193,7 @@ docs/
 **version-generator.ts** (Core Logic)
 - `generateFileBasedVersion()`: Main function for file-based versioning
 - `generatePreCommitVersionData()`: The `package-json` mode computation, run from the pre-commit hook
+- `generateVersionDataForMode()`: The per-mode derivation choice (`event-log` → `generateEventLogVersionData()`, otherwise `generateFileBasedVersion()`), in one place so the watcher and the metro plugin cannot drift from the CLI. The CLI itself still makes the same choice inline in `src/index.ts`
 - `getVersionMode()` / `isMergeDriverEnabled()`: Read one knob each out of version-manager.json
 - `createDefaultVersionManagerConfig()`: Writes a default version-manager.json — exported but with NO callers; nothing creates that file today
 - `parseGitDescribe()`: Parses git describe output (legacy, still used internally)
@@ -205,9 +208,10 @@ docs/
 - `decideBranchSuffix()`: Turns two commit measurements into a decision, or into a warning when neither measurement worked — a failed count never becomes a `0`
 
 **generated-file-policy.ts** (Does this mode write a file at all?)
-- `shouldWriteGeneratedFiles()`: THE decision, in one place — `package-json` mode writes nothing unless `--output` was passed explicitly
+- `shouldWriteGeneratedFiles()`: THE decision, in one place — `package-json` and `event-log` mode write nothing unless `--output` was passed explicitly. The CLI, the hooks, the watcher and the metro plugin all ask it
 - `resolveOutputPathOption()`: Distinguishes "the user typed --output" from "nobody typed anything", which a yargs default would erase
 - `writeGeneratedFiles()`: Writes the JSON and its .d.ts, or returns nulls meaning deliberately-not-written
+- `describeNoGeneratedFile()`: The wording for "this mode writes no file, and here is where the version lives", shared by the watcher and the metro plugin. Wording only, not a second policy
 
 **json-text-edit.ts** (Surgical JSON edits)
 - `findTopLevelStringValueSpan()` / `replaceTopLevelStringValue()`: Replace one top-level string value in JSON *text*
@@ -254,11 +258,14 @@ docs/
 - Runs during Metro's serialization phase
 - Generates version data in memory and compares with existing file
 - Only writes if content has changed (prevents rebuild loops)
-- Silently fails on errors to avoid breaking builds
+- Writes only in `dynamic-file` mode. Its path is fixed and never explicit, so in `package-json` and `event-log` mode it writes nothing and emits ONE `console.warn` per process saying where the version lives
+- Silently fails on errors to avoid breaking builds (the mode read is inside that same try)
 - Exported as `@justinhaaheim/version-manager/metro-plugin`
 
 **watcher.ts** (File Watcher)
-- `startWatcher()`: Main file watching function for auto-regeneration
+- `startWatcher()`: Main file watching function for auto-regeneration. Returns `{status: 'started', cleanup}` or `{status: 'not-started', versionMode}`: in a mode with no generated file and no explicit `--output` it prints one message, starts nothing, and `watch` exits 0
+- Takes an `OutputPathOption`, not a bare path, so an explicit `--output` is honoured in every mode
+- Re-reads `versionMode` on every regeneration and derives with `generateVersionDataForMode()`
 - Uses chokidar for cross-platform file watching
 - Watches git state (.git/HEAD, .git/refs), config files, and project files
 - Respects .gitignore patterns automatically
@@ -503,7 +510,8 @@ bun test <file>             # Run specific test file
   - `cli-output.test.ts` - CLI output format tests
   - `config-migration.test.ts` - Config migration tests
   - `git-hooks.test.ts` - Hook installation tests (may be flaky)
-  - `watcher.test.ts` - File watcher tests (may be flaky)
+  - `watcher.test.ts` - File watcher tests (may be flaky), including the watcher in each version mode
+  - `metro-plugin.test.ts` - The metro plugin in each version mode, each run in its own process via `tests/helpers/run-metro-plugin.ts` with a stub serializer (metro is not installed here)
 - `tests/helpers/` - Test utilities and fixtures
 - `tests/smoke.test.ts` - Basic infrastructure tests
 - `src/output-formatter.test.ts` - One test file lives beside its source rather than under `tests/`
@@ -556,7 +564,7 @@ To update runtime version (only when native changes require it):
 
 ## Version File Regeneration
 
-All of this is `dynamic-file` mode. In `package-json` mode there is no generated file to regenerate: a `pre-commit` hook writes the version into `package.json` instead, and none of the four post-\* hooks are installed. (The watcher and the metro plugin below have not been taught that yet and still write the file in both modes.)
+All of this is `dynamic-file` mode. In `package-json` and `event-log` mode there is no generated file to regenerate: a `pre-commit` hook writes the version into `package.json` (or appends one event to `version.jsonl`) instead, and none of the four post-\* hooks are installed. The watcher and the metro plugin below follow the same rule: in those two modes `watch` says where the version lives and exits 0 without watching unless `--output` is explicit, and the metro plugin writes nothing and warns once per process.
 
 The `dynamic-version.local.json` file is automatically regenerated in two ways:
 

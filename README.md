@@ -390,7 +390,7 @@ npx @justinhaaheim/version-manager install
 
 Measured: `install --help` lists no mode option, and `install` in a repository with no `version-manager.json` neither creates one nor asks for one — it installs `dynamic-file` hooks. The config file has to exist and say `package-json` **before** you install.
 
-Install then writes a `pre-commit` hook and **no `post-*` hooks at all**, adds no `prebuild` / `predev` / `prestart` lifecycle scripts, and leaves `.gitignore` alone: there is no generated file in this mode to regenerate or to ignore. Nothing writes `dynamic-version.local.json` unless you pass `--output` explicitly, which is read as unambiguous intent and honoured.
+Install then writes a `pre-commit` hook and **no `post-*` hooks at all**, adds no `prebuild` / `predev` / `prestart` lifecycle scripts, and leaves `.gitignore` alone: there is no generated file in this mode to regenerate or to ignore. Nothing writes `dynamic-version.local.json` unless you pass `--output` explicitly, which is read as unambiguous intent and honoured. That includes `watch`, which says where the version lives and exits without watching, and the metro plugin, which writes nothing and warns once.
 
 **Switching an existing project over leaves the old mode's machinery behind.** Measured: the four `post-*` hooks stay on disk and keep running, an existing `dynamic-version.local.json` stays where it is and is never updated again, and the lifecycle scripts stay in `package.json`. A stale generated file is worse than a missing one — absent fails loudly at the import, stale reads as current — so clean these up by hand. Read each hook before deleting it: `install` appends to hooks that already exist, so a hook file may contain lines that are not ours.
 
@@ -456,7 +456,7 @@ git add version.jsonl .gitattributes && git commit -m 'Set up event-log versioni
 1. creates an **empty `version.jsonl`** if there is none (an empty log is legal — it derives `package.json`'s version with a count of zero);
 2. adds **`version.jsonl merge=union`** to `.gitattributes`, appending rather than rewriting, and leaving an existing file's other entries alone;
 3. installs a **`pre-commit` hook** and no `post-*` hooks;
-4. adds no lifecycle scripts, touches `.gitignore` not at all, and writes no `dynamic-version.local.json` unless you pass `--output` explicitly.
+4. adds no lifecycle scripts, touches `.gitignore` not at all, and writes no `dynamic-version.local.json` unless you pass `--output` explicitly. `watch` and the metro plugin follow the same rule, and `watch --output <path>` writes the version derived from `version.jsonl`.
 
 Running it twice changes nothing the second time.
 
