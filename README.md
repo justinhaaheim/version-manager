@@ -27,7 +27,11 @@ This will:
 - Generate `dynamic-version.local.json` (gitignored - computed versions)
 - Add `*.local.json` to your `.gitignore`
 
-It does **not** create `version-manager.json` (measured): that file is optional, and you write it yourself when you want anything other than the defaults — see [Version Files](#version-files).
+Plain `install` does **not** create `version-manager.json`: that file is optional, and the defaults apply without it — see [Version Files](#version-files). To pick a [version mode](#version-modes-where-the-computed-version-ends-up), pass `--mode`, which records it in `version-manager.json` and then installs for it:
+
+```bash
+npx @justinhaaheim/version-manager install --mode event-log
+```
 
 ## Quick Start
 
@@ -159,8 +163,24 @@ Installs git hooks and adds npm scripts to your `package.json`.
 
 **Options:**
 
+- `--mode <dynamic-file|package-json|event-log>`: Record this `versionMode` in `version-manager.json`, then install for it (see below)
 - `--silent, -s`: Suppress console output
 - `--fail/--no-fail`: Exit with error code on failures
+
+The hooks and scripts above are `dynamic-file` mode's. The other two modes install a `pre-commit` hook instead and none of the above: see [Version Modes](#version-modes-where-the-computed-version-ends-up).
+
+**`--mode`** writes the mode into `version-manager.json` first, and install then runs exactly as if the file had always said it. It touches nothing else in that file:
+
+- No file: it creates one holding only `{"versionMode": "<mode>"}`. Every other field keeps its default, and no defaults are written into your repository.
+- A file that names another mode: only that value changes. Every other byte of the file stays as it was.
+- A file with no `versionMode`: the key is added at the end, in the file's own indentation. Nothing else changes, and no default field is added.
+- A file in the old format (top-level `runtimeVersion`): it is migrated as usual, `runtimeVersion` moving to `versions.runtime`, and given the mode.
+- A file that already names that mode: nothing is written, and install says so.
+- A file that is present but broken (not JSON, or not a valid config): install stops, names the file and the problem, and writes and installs nothing. `--mode` never replaces a file it cannot read.
+
+Without `--mode`, install reads the mode from `version-manager.json` as it always has.
+
+**Switching an existing project to another mode warns, but does not clean up.** install checks what the old mode left behind and names what it finds: leaving `dynamic-file` leaves the four `post-*` hooks, the lifecycle scripts and `dynamic-version.local.json`; leaving `package-json` or `event-log` for `dynamic-file` leaves the `pre-commit` hook, which in `dynamic-file` mode rewrites the version in `package.json` on every commit. Remove them by hand, reading each hook first: `install` appends to hooks that already exist, so a hook file may contain lines that are not ours. Switching between `package-json` and `event-log` leaves no hook behind, because both install the same `pre-commit` command.
 
 ### 3. Bump Version
 
@@ -372,27 +392,15 @@ The cost is that the version changes on **every** commit, so `package.json` is r
 
 ### Turning it on
 
-There is no `--mode` flag and `install` does not ask, so write `version-manager.json` yourself first:
-
-```json
-{
-  "versionCalculationMode": "add-to-patch",
-  "versionMode": "package-json",
-  "versions": {}
-}
-```
-
-Then install:
-
 ```bash
-npx @justinhaaheim/version-manager install
+npx @justinhaaheim/version-manager install --mode package-json
 ```
 
-Measured: `install --help` lists no mode option, and `install` in a repository with no `version-manager.json` neither creates one nor asks for one — it installs `dynamic-file` hooks. The config file has to exist and say `package-json` **before** you install.
+`--mode` records `"versionMode": "package-json"` in `version-manager.json` — creating the file if there is none, and changing nothing else in it if there is — and then installs for that mode. Commit `version-manager.json`: every later plain `install`, and every hook, reads the mode from it. Writing the key by hand and running a plain `install` does the same.
 
 Install then writes a `pre-commit` hook and **no `post-*` hooks at all**, adds no `prebuild` / `predev` / `prestart` lifecycle scripts, and leaves `.gitignore` alone: there is no generated file in this mode to regenerate or to ignore. Nothing writes `dynamic-version.local.json` unless you pass `--output` explicitly, which is read as unambiguous intent and honoured. That includes `watch`, which says where the version lives and exits without watching, and the metro plugin, which writes nothing and warns once.
 
-**Switching an existing project over leaves the old mode's machinery behind.** Measured: the four `post-*` hooks stay on disk and keep running, an existing `dynamic-version.local.json` stays where it is and is never updated again, and the lifecycle scripts stay in `package.json`. A stale generated file is worse than a missing one — absent fails loudly at the import, stale reads as current — so clean these up by hand. Read each hook before deleting it: `install` appends to hooks that already exist, so a hook file may contain lines that are not ours.
+**Switching an existing project over leaves the old mode's machinery behind.** Measured: the four `post-*` hooks stay on disk and keep running, an existing `dynamic-version.local.json` stays where it is and is never updated again, and the lifecycle scripts stay in `package.json`. `install --mode` names the ones it finds in a warning, but does not remove them. A stale generated file is worse than a missing one — absent fails loudly at the import, stale reads as current — so clean these up by hand. Read each hook before deleting it: `install` appends to hooks that already exist, so a hook file may contain lines that are not ours.
 
 ### What the pre-commit hook does, exactly
 
@@ -434,22 +442,14 @@ Merging two branches unions their lines, and a count over a union is the same nu
 
 ### Turning it on
 
-Write `version-manager.json` first — as with `package-json` mode, `install` neither asks nor creates one:
-
-```json
-{
-  "versionCalculationMode": "add-to-patch",
-  "versionMode": "event-log",
-  "versions": {}
-}
-```
-
-Then install, and commit what it produces:
+Install with `--mode`, and commit what it produces:
 
 ```bash
-npx @justinhaaheim/version-manager install
-git add version.jsonl .gitattributes && git commit -m 'Set up event-log versioning'
+npx @justinhaaheim/version-manager install --mode event-log
+git add version-manager.json version.jsonl .gitattributes && git commit -m 'Set up event-log versioning'
 ```
+
+`--mode` records `"versionMode": "event-log"` in `version-manager.json` — creating the file if there is none, and changing nothing else in it if there is — and then installs for that mode. Writing the key by hand and running a plain `install` does the same.
 
 `install` does four things and nothing else:
 

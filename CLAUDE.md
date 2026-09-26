@@ -62,6 +62,7 @@ bun run test:local:install  # For local development
 - In `dynamic-file` mode: installs post-commit, post-checkout, post-merge and post-rewrite hooks, adds the lifecycle scripts (prebuild, predev, prestart), and generates the initial version file
 - In `package-json` mode: installs a `pre-commit` hook and NOTHING else — no post-* hooks, no lifecycle scripts, no gitignore entries, no generated file. It also registers the merge driver, but only when `mergeDriver.enabled` is on
 - Does NOT remove the other mode's hooks, scripts or generated file when the mode changes
+- With `--mode <m>`: first makes version-manager.json say `versionMode: m` (creating a file holding only that key, replacing just the value, or appending the key surgically; a legacy file is migrated; an invalid file fails and nothing is written or installed), then installs exactly as a file that always said `m` would. When the mode changes it warns, naming the old mode's leftovers it finds on disk. See src/install-mode.ts and the README
 - Works with standard .git/hooks and Husky
 
 **Scripts added** (`dynamic-file` mode; the lifecycle four are skipped in `package-json` mode):
@@ -76,6 +77,7 @@ bun run test:local:install  # For local development
 The three `pre*` scripts are written as a bare `npx @justinhaaheim/version-manager`, with no `--silent --no-fail` — the flagged versions are commented out in `script-manager.ts`.
 
 **Options:**
+- `--mode <dynamic-file|package-json|event-log>`: Record this versionMode in version-manager.json, then install for it. No default: without it, install reads the mode from the file as before
 - `--increment-patch`: Increment patch version with each commit (deprecated in favor of file-based system)
 - `--silent, -s`: Suppress console output
 - `--fail/--no-fail`: Exit with error code on failures
@@ -164,6 +166,7 @@ src/
   version-math.ts           # calculateCodeVersion, alone, so the reader pulls in no git
   gitattributes.ts          # One idempotent .gitattributes line, without clobbering
   json-text-edit.ts         # Surgical text edits to one JSON value, formatting preserved
+  install-mode.ts           # install --mode: record the mode in the config, name the old mode's leftovers
   merge-driver.ts           # The package.json merge driver and its registration
   output-formatter.ts       # Rendering the CLI's version output
   git-utils.ts             # Git commands (describe, log, commit tracking)
@@ -213,8 +216,13 @@ docs/
 - `writeGeneratedFiles()`: Writes the JSON and its .d.ts, or returns nulls meaning deliberately-not-written
 - `describeNoGeneratedFile()`: The wording for "this mode writes no file, and here is where the version lives", shared by the watcher and the metro plugin. Wording only, not a second policy
 
+**install-mode.ts** (`install --mode`, version-manager-70i.7)
+- `recordVersionMode()`: Makes version-manager.json say the requested mode and nothing else changes; checks the new text through `parseVersionManagerConfigText()` before writing and reads it back after
+- `describeModeSwitchLeftovers()` / `formatModeSwitchWarning()`: What the previous mode left on disk (hooks, lifecycle scripts, generated file). A check that fails is worded conditionally, never reported as absent
+
 **json-text-edit.ts** (Surgical JSON edits)
 - `findTopLevelStringValueSpan()` / `replaceTopLevelStringValue()`: Replace one top-level string value in JSON *text*
+- `appendTopLevelStringProperty()`: Add a top-level string property at the end, in the file's own layout
 - Used instead of parse-and-stringify so formatting, key order and every other byte of package.json survive a version bump
 
 **merge-driver.ts** (package.json merge driver)
@@ -468,7 +476,7 @@ npm run dynamic-version:generate
 
 ### File Operations
 - **Missing .gitignore**: Prompts user to add `*.local.json`
-- **Missing version-manager.json**: Nothing is created and nothing is asked; the defaults are used
+- **Missing version-manager.json**: Nothing is created and nothing is asked; the defaults are used. The one exception is `install --mode`, which creates a file holding only `versionMode`
 - **Broken version-manager.json** (not JSON, an unknown field, a value the schema rejects): every command fails with an error naming the file and the problem, including the pre-commit hook, which aborts the commit. It is never replaced by the defaults (70i.18.2, S4): that used to turn a typo in a `package-json` or `event-log` project into `dynamic-file` mode. `readVersionManagerConfig()` returns `absent | ok | invalid`; only `absent` gets the defaults. `--no-fail` still exits 0 outside the pre-commit path
 - **Broken package.json** (present but not valid JSON): the command fails saying so (70i.18.2, S5). `readPackageJson()` returns null only when the file is absent. In `package-json` mode the pre-commit hook reads its base version from the git index, not through `readPackageJson()`, so this does not change how that hook treats a mid-edit working-tree file (except on the fallback where package.json has never been staged). `event-log` mode and `readVersion()` read the working-tree package.json, so there a corrupt one fails the command
 - **Output path doesn't exist**: Parent directory must exist (not created automatically)
@@ -509,6 +517,7 @@ bun test <file>             # Run specific test file
   - `event-log-mode.test.ts` - Real git merges of `version.jsonl`, install, bump, the reader
   - `git-measurement-failures.test.ts` - A real git failure per measurement (stub git from `tests/helpers/stub-git.ts`) ends the command, naming it
   - `generated-file-policy.test.ts` - What install writes in each mode
+  - `install-mode.test.ts` - `install --mode`: the config it writes, the refusals, and the mode-switch warning
   - `cli-output.test.ts` - CLI output format tests
   - `config-migration.test.ts` - Config migration tests
   - `git-hooks.test.ts` - Hook installation tests (may be flaky)
