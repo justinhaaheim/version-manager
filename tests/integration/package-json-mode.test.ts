@@ -847,11 +847,18 @@ describe('package-json version mode', () => {
       // corruption of the one file this mode exists to keep correct.
       setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
 
+      // The `dynamic-version` script is load-bearing. activateHooks() runs
+      // `install --silent`, which adds its scripts through JSON.parse and
+      // JSON.stringify (since version-manager-70i.14; it used to skip them
+      // under --silent). That rewrite collapses the duplicate key this test
+      // needs. An existing dynamic-version script makes install preserve the
+      // file as it is, so the duplicate survives byte for byte.
       const duplicated = [
         '{',
         '  "version": "0.1.0",',
         '  "name": "test-package",',
         '  "devDependencies": {"husky": "^9.1.7"},',
+        '  "scripts": {"dynamic-version": "npx @justinhaaheim/version-manager"},',
         '  "version": "9.9.9"',
         '}',
         '',

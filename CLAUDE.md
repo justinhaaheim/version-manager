@@ -519,6 +519,7 @@ bun test <file>             # Run specific test file
   - `git-measurement-failures.test.ts` - A real git failure per measurement (stub git from `tests/helpers/stub-git.ts`) ends the command, naming it
   - `generated-file-policy.test.ts` - What install writes in each mode
   - `install-mode.test.ts` - `install --mode`: the config it writes, the refusals, and the mode-switch warning
+  - `install-silent.test.ts` - `install --silent` adds the same scripts as a non-silent install and prints nothing on stdout
   - `cli-output.test.ts` - CLI output format tests
   - `config-migration.test.ts` - Config migration tests
   - `git-hooks.test.ts` - Hook installation tests (may be flaky)

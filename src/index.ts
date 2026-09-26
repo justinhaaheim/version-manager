@@ -668,24 +668,33 @@ async function installCommand(
       console.log('   - Merges (post-merge)');
       console.log('   - Rebases (post-rewrite)');
     }
+  }
 
-    // Add scripts to package.json during install
+  // Add scripts to package.json during install. Deliberately OUTSIDE the
+  // silent guard (version-manager-70i.14): --silent hides what install says,
+  // not what it does. It used to wrap this whole block, so a silent install
+  // added no scripts at all. Only the console output below is guarded.
+  if (!silent) {
     console.log('\n📝 Checking package.json scripts...');
-    const projectPackageJson = readPackageJson();
-    if (projectPackageJson) {
-      const hasExisting = hasExistingDynamicVersionScripts(projectPackageJson);
-      if (hasExisting && !force) {
+  }
+  const projectPackageJson = readPackageJson();
+  if (projectPackageJson) {
+    const hasExisting = hasExistingDynamicVersionScripts(projectPackageJson);
+    if (hasExisting && !force) {
+      if (!silent) {
         console.log(
           '   ℹ️  Existing dynamic-version scripts detected. Preserving customizations.',
         );
         console.log(
           '   💡 Use --force to overwrite existing scripts with defaults',
         );
-      } else {
-        // The lifecycle scripts (prepare/prebuild/predev/prestart) exist only
-        // to regenerate the generated file. In package-json mode there is no
-        // generated file, so they would shell out on every build for nothing.
-        const result = addScriptsToPackageJson(force, usesGeneratedFile);
+      }
+    } else {
+      // The lifecycle scripts (prepare/prebuild/predev/prestart) exist only
+      // to regenerate the generated file. In package-json mode there is no
+      // generated file, so they would shell out on every build for nothing.
+      const result = addScriptsToPackageJson(force, usesGeneratedFile);
+      if (!silent) {
         if (result.success) {
           console.log(`   ✅ ${result.message}`);
           if (result.conflictsOverwritten.length > 0) {
@@ -715,9 +724,9 @@ async function installCommand(
           console.log(`   ⚠️  ${result.message}`);
         }
       }
-    } else {
-      console.log('   ⚠️  No package.json found. Scripts not installed.');
     }
+  } else if (!silent) {
+    console.log('   ⚠️  No package.json found. Scripts not installed.');
   }
 }
 
