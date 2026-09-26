@@ -46,7 +46,7 @@ npx @justinhaaheim/version-manager [options]
 bun run test:local  # For local development
 ```
 - Generates `dynamic-version.local.json` with computed versions — in `dynamic-file` mode, or when `--output` is passed explicitly
-- Does NOT create `version-manager.json` when it is missing: the file is optional, `createDefaultVersionManagerConfig()` has no callers, and the defaults are used instead
+- Does NOT create `version-manager.json` when it is missing: the file is optional and the defaults are used instead. Only `install --mode` writes that file
 - Prompts to add `*.local.json` to .gitignore if missing
 
 **Options:**
@@ -195,7 +195,7 @@ docs/
 - `generatePreCommitVersionData()`: The `package-json` mode computation, run from the pre-commit hook
 - `generateVersionDataForMode()`: The per-mode derivation choice (`event-log` → `generateEventLogVersionData()`, otherwise `generateFileBasedVersion()`), in one place so the watcher and the metro plugin cannot drift from the CLI. The CLI itself still makes the same choice inline in `src/index.ts`
 - `getVersionMode()` / `isMergeDriverEnabled()`: Read one knob each out of version-manager.json
-- `createDefaultVersionManagerConfig()`: Writes a default version-manager.json — exported but with NO callers; nothing creates that file today
+- `readVersionManagerConfig()` / `parseVersionManagerConfigText()`: Read the config as absent, ok (possibly migrated from the legacy shape) or invalid, from a path or from text. Nothing here writes a default config: only `install --mode` writes the file, and only its `versionMode` (see install-mode.ts)
 - `parseGitDescribe()`: Parses git describe output (legacy, still used internally)
 - `calculateCodeVersion()`: Implements both calculation modes
 - `formatHumanReadable()`: Legacy function for human-readable versions

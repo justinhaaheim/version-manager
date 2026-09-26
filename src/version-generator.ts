@@ -368,28 +368,6 @@ function decorateVersion(
 }
 
 /**
- * Create default version-manager.json configuration
- * @param configPath - Path to version-manager.json
- * @param silent - Suppress console output
- */
-export function createDefaultVersionManagerConfig(
-  configPath: string,
-  silent = false,
-): void {
-  const defaultConfig = getDefaultVersionManagerConfig();
-
-  writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2) + '\n');
-
-  if (!silent) {
-    console.log('✅ Created version-manager.json with default values:');
-    console.log(
-      `   versionCalculationMode: ${defaultConfig.versionCalculationMode}`,
-    );
-    console.log(`   versions: {}`);
-  }
-}
-
-/**
  * Generate a build number in iOS-compatible format
  * Format: YYYYMMDD.HHmmss.SS (18 characters max)
  * Example: 20251020.143245.67
