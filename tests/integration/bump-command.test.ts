@@ -1,5 +1,11 @@
 import {afterEach, beforeEach, describe, expect, test} from 'bun:test';
 
+import {VERSION_LOG_FILENAME} from '../../src/event-log';
+import {
+  activateHooks,
+  setupEventLogModeRepo,
+  setupPackageJsonModeRepo,
+} from '../helpers/repo-fixtures';
 import {TestRepo} from '../helpers/test-repo';
 
 /**
@@ -45,6 +51,11 @@ function tags(repo: TestRepo): string {
   // A failed listing must not read as "no tags" (critical rule 6).
   expect(result.exitCode).toBe(0);
   return result.stdout.trim();
+}
+
+/** The closing tip bump prints when it did not commit. */
+function tipFor(files: string, version: string): string {
+  return `💡 Tip: Commit this change with: git add ${files} && git commit -m "Bump version to ${version}"`;
 }
 
 describe('bump creates a tag only when asked (version-manager-70i.34)', () => {
@@ -234,6 +245,162 @@ describe('--types / --no-types still control the .d.ts (version-manager-70i.34)'
       expect(repo.fileExists('dynamic-version.local.json')).toBe(true);
       expect(repo.fileExists('dynamic-version.local.d.ts')).toBe(false);
       expect(tags(repo)).toBe('0.1.1');
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+describe('bump names and stages exactly the files it wrote (version-manager-70i.35)', () => {
+  let repo: TestRepo;
+
+  beforeEach(() => {
+    repo = new TestRepo();
+  });
+
+  afterEach(() => {
+    repo.cleanup();
+  });
+
+  test(
+    'dynamic-file mode: a plain bump tips package.json, not version-manager.json',
+    () => {
+      setupBumpRepo(repo, {
+        versionCalculationMode: 'add-to-patch',
+        versionMode: 'dynamic-file',
+        versions: {},
+      });
+
+      const result = repo.runCli('bump');
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(tipFor('package.json', '0.1.1'));
+      expect(result.stdout).not.toContain('git add version-manager.json');
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    'dynamic-file mode with no version-manager.json at all: the tip names package.json',
+    () => {
+      // The 70i.30 scenario the bug was found in: following the old tip
+      // staged nothing, because the file it named does not exist.
+      setupBumpRepo(repo, null);
+
+      const result = repo.runCli('bump');
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(tipFor('package.json', '0.1.1'));
+      expect(repo.fileExists('version-manager.json')).toBe(false);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    'package-json mode: a plain bump tips package.json, not version-manager.json',
+    () => {
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+
+      const result = repo.runCli('bump');
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(tipFor('package.json', '0.1.1'));
+      expect(result.stdout).not.toContain('git add version-manager.json');
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    'bump runtime (a named version synced) tips both files',
+    () => {
+      setupBumpRepo(repo, {
+        versionCalculationMode: 'add-to-patch',
+        versions: {runtime: '0.1.0'},
+      });
+
+      const result = repo.runCli('bump runtime');
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(
+        tipFor('package.json version-manager.json', '0.1.1'),
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    'a migrated legacy config: the tip names both files',
+    () => {
+      // bumpVersion() rewrites a legacy config (top-level runtimeVersion) into
+      // the current shape even when no named version is synced.
+      setupBumpRepo(repo, {
+        runtimeVersion: '0.5.0',
+        versionCalculationMode: 'add-to-patch',
+      });
+
+      const result = repo.runCli('bump');
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('Migrated version-manager.json');
+      expect(result.stdout).toContain(
+        tipFor('package.json version-manager.json', '0.1.1'),
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    'bump --commit with a migrated legacy config commits the migration too',
+    () => {
+      // The --commit path used to stage version-manager.json only when a
+      // named version was synced, so the migration was left uncommitted.
+      setupBumpRepo(repo, {
+        runtimeVersion: '0.5.0',
+        versionCalculationMode: 'add-to-patch',
+      });
+
+      const result = repo.runCli('bump --commit');
+
+      expect(result.exitCode).toBe(0);
+      const committed = JSON.parse(
+        repo.runGit('show HEAD:version-manager.json').stdout,
+      ) as {runtimeVersion?: string; versions?: Record<string, string>};
+      expect(committed.runtimeVersion).toBeUndefined();
+      expect(committed.versions).toEqual({runtime: '0.5.0'});
+      expect(repo.runGit('status --porcelain').stdout).toBe('');
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    'bump runtime --commit commits both files',
+    () => {
+      setupBumpRepo(repo, {
+        versionCalculationMode: 'add-to-patch',
+        versions: {runtime: '0.1.0'},
+      });
+
+      const result = repo.runCli('bump runtime --commit');
+
+      expect(result.exitCode).toBe(0);
+      const committed = JSON.parse(
+        repo.runGit('show HEAD:version-manager.json').stdout,
+      ) as {versions?: Record<string, string>};
+      expect(committed.versions).toEqual({runtime: '0.1.1'});
+      expect(repo.runGit('status --porcelain').stdout).toBe('');
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    'event-log mode: the tip still names the log',
+    () => {
+      setupEventLogModeRepo(repo, '0.1.0', 'add-to-patch');
+      activateHooks(repo);
+
+      const result = repo.runCli('bump --minor');
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(tipFor(VERSION_LOG_FILENAME, '0.2.0'));
     },
     TEST_TIMEOUT_MS,
   );

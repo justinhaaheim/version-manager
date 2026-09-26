@@ -911,18 +911,16 @@ async function bumpCommand(
     const commitMessage = message ?? `Bump version to ${result.newVersion}`;
 
     try {
-      // Stage what this mode actually changed. In event-log mode that is the
-      // log and nothing else: package.json is deliberately untouched (E11),
-      // and `git add`ing it here would sweep in whatever else the author has
-      // edited in it.
+      // Stage exactly the files this bump wrote (version-manager-70i.35). In
+      // event-log mode that is the log and nothing else: package.json is
+      // deliberately untouched (E11), and `git add`ing it here would sweep in
+      // whatever else the author has edited in it. Elsewhere it is
+      // package.json, plus version-manager.json when a named version was
+      // synced OR a legacy config was migrated; the migration used to be left
+      // out of the commit.
       // TODO: Extract these CLI calls to git-utils so we have a function to call for `gitAddPackageJson`, etc instead of manually writing out the commands here
-      if (eventLogMode) {
-        execSync(`git add ${VERSION_LOG_FILENAME}`, {stdio: 'pipe'});
-      } else {
-        execSync('git add package.json', {stdio: 'pipe'});
-      }
-      if (result.updatedVersions.length > 0) {
-        execSync('git add version-manager.json', {stdio: 'pipe'});
+      for (const file of result.changedFiles) {
+        execSync(`git add ${file}`, {stdio: 'pipe'});
       }
       execSync(`git commit -m '${commitMessage.replace(/'/g, "'\\''")}'`, {
         stdio: 'pipe',
@@ -989,14 +987,12 @@ async function bumpCommand(
       throw error;
     }
   } else if (!silent) {
-    // Name the file this mode actually changed. In event-log mode the bump is
-    // one appended line in the log, and telling the author to stage
-    // version-manager.json would stage nothing and commit nothing. The other
-    // modes' wording is left exactly as it was.
-    const bumpedFile = eventLogMode
-      ? VERSION_LOG_FILENAME
-      : 'version-manager.json';
-    let tip = `\n💡 Tip: Commit this change with: git add ${bumpedFile} && git commit -m "Bump version to ${result.newVersion}"`;
+    // Name exactly the files this bump wrote, the same list --commit stages
+    // (version-manager-70i.35). The tip used to name version-manager.json in
+    // every mode but event-log, although bump always writes package.json and
+    // writes version-manager.json only to sync a version or migrate a config:
+    // following it staged nothing, or staged the wrong file.
+    let tip = `\n💡 Tip: Commit this change with: git add ${result.changedFiles.join(' ')} && git commit -m "Bump version to ${result.newVersion}"`;
     if (tag && !commit) {
       tip += `\n💡 Note: --tag requires --commit to create a git tag`;
     }

@@ -976,6 +976,13 @@ export type BumpType = 'major' | 'minor' | 'patch';
  * Result of bumping version
  */
 export interface BumpVersionResult {
+  /**
+   * The committed files this bump wrote, in staging order
+   * (version-manager-70i.35). `bump --commit` stages exactly these and the
+   * closing tip names exactly these, so neither guesses from the mode. The
+   * generated, gitignored version file is never among them.
+   */
+  changedFiles: string[];
   newVersion: string;
   oldVersion: string;
   updatedVersions: string[]; // Names of custom versions that were updated
@@ -1117,7 +1124,12 @@ export async function bumpEventLogVersion(
     console.log('   package.json was not modified (event-log mode)');
   }
 
-  return {newVersion, oldVersion, updatedVersions: []};
+  return {
+    changedFiles: [VERSION_LOG_FILENAME],
+    newVersion,
+    oldVersion,
+    updatedVersions: [],
+  };
 }
 
 /**
@@ -1190,8 +1202,11 @@ export async function bumpVersion(
     throw new Error('Failed to update package.json');
   }
 
-  // Update custom versions in config if requested
+  // Update custom versions in config if requested. `wroteConfig` records each
+  // write where it happens, so changedFiles reports what was written rather
+  // than re-deriving it from the inputs (version-manager-70i.35).
   const updatedVersions: string[] = [];
+  let wroteConfig = false;
   if (customVersionsToUpdate.length > 0 && config.versions) {
     for (const versionName of customVersionsToUpdate) {
       config.versions[versionName] = newVersion;
@@ -1200,9 +1215,11 @@ export async function bumpVersion(
 
     // Write updated config (including migration if it occurred)
     writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    wroteConfig = true;
   } else if (migrated) {
     // Write migrated config even if no custom versions to update
     writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    wroteConfig = true;
   }
 
   if (!silent) {
@@ -1220,6 +1237,9 @@ export async function bumpVersion(
   }
 
   return {
+    changedFiles: wroteConfig
+      ? ['package.json', 'version-manager.json']
+      : ['package.json'],
     newVersion,
     oldVersion,
     updatedVersions,
