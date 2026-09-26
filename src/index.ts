@@ -930,27 +930,30 @@ async function bumpCommand(
 
 // Watch command handler
 async function watchCommand(
-  outputPath: string,
+  output: OutputPathOption,
   debounce: number,
   silent: boolean,
   failOnError: boolean,
   generateTypes: boolean,
 ): Promise<void> {
-  if (!silent) {
-    console.log('🚀 Starting file watcher...\n');
-  }
-
-  const cleanup = await startWatcher({
+  const watcher = await startWatcher({
     debounce,
     failOnError,
     generateTypes,
-    outputPath,
+    output,
     silent,
   });
 
+  // A mode with no generated file, and no explicit --output: there is nothing
+  // to watch for. startWatcher() has already said so and started nothing, so
+  // returning lets main() exit 0 (version-manager-70i.11, W3).
+  if (watcher.status === 'not-started') {
+    return;
+  }
+
   // Handle graceful shutdown on Ctrl+C
   const handleShutdown = (): void => {
-    cleanup();
+    watcher.cleanup();
     process.exit(0);
   };
 
@@ -1214,11 +1217,11 @@ async function main() {
             },
           }),
         async (args) => {
-          // The watcher still writes the generated file in BOTH modes; that
-          // hole is deliberate and filed as version-manager-70i.11, so it
-          // takes the resolved path and ignores the write policy.
+          // W2 (version-manager-70i.11): pass the OutputPathOption, not a
+          // bare path, so the watcher can tell an explicit --output from the
+          // default. The same write policy as every other command follows.
           await watchCommand(
-            args.output ?? DEFAULT_OUTPUT_PATH,
+            resolveOutputPathOption(args.output),
             args.debounce,
             args.silent,
             args.fail,

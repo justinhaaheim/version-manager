@@ -1,10 +1,18 @@
+import type {VersionMode} from './types';
+
 import chokidar from 'chokidar';
 import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
 import {
-  generateFileBasedVersion,
+  describeNoGeneratedFile,
+  type OutputPathOption,
+  shouldWriteGeneratedFiles,
+} from './generated-file-policy';
+import {
   generateTypeDefinitions,
+  generateVersionDataForMode,
+  getVersionMode,
 } from './version-generator';
 
 /**
@@ -17,21 +25,75 @@ export interface WatcherOptions {
   failOnError: boolean;
   /** Generate TypeScript definitions */
   generateTypes: boolean;
-  /** Output path for version file */
-  outputPath: string;
+  /**
+   * Where to write, and whether the user asked for that path
+   * (version-manager-70i.11, W2). The flag matters: in a mode with no
+   * generated file, only an explicit --output produces one.
+   */
+  output: OutputPathOption;
   /** Suppress console output */
   silent: boolean;
 }
 
 /**
- * Start watching files and auto-regenerate version on changes
+ * What startWatcher() did.
+ *
+ * "Not started" is its own case rather than a no-op cleanup function, so the
+ * caller cannot mistake it for a running watcher and wait on it forever
+ * (version-manager-70i.11, W3).
+ */
+export type WatcherStartResult =
+  | {
+      /** Stops the watcher */
+      cleanup: () => void;
+      status: 'started';
+    }
+  | {
+      status: 'not-started';
+      /** The mode that has nothing for the watcher to write */
+      versionMode: VersionMode;
+    };
+
+/**
+ * The one message printed when the watcher declines to start (W3).
+ */
+function describeWatcherNotStarted(versionMode: VersionMode): string {
+  return [
+    `ℹ️  Not watching: ${describeNoGeneratedFile(versionMode)}`,
+    '   Pass --output <path> to watch and write a version file there anyway.',
+  ].join('\n');
+}
+
+/**
+ * Start watching files and auto-regenerate version on changes.
+ *
+ * In a mode that writes no generated file (package-json, event-log), and
+ * without an explicit --output, there is nothing for the watcher to do. It
+ * says so once, does not start chokidar, and returns `not-started`
+ * (version-manager-70i.11, W3).
+ *
  * @param options - Watcher configuration options
- * @returns Promise that resolves when watcher is initialized
+ * @returns Whether the watcher started, and how to stop it if it did
  */
 export async function startWatcher(
   options: WatcherOptions,
-): Promise<() => void> {
-  const {outputPath, debounce, silent, failOnError, generateTypes} = options;
+): Promise<WatcherStartResult> {
+  const {output, debounce, silent, failOnError, generateTypes} = options;
+  const outputPath = output.path;
+
+  // W3: the same single decision every other writer asks
+  // (generated-file-policy, 70i.2 D12). No new policy here.
+  const startupVersionMode = getVersionMode();
+  if (!shouldWriteGeneratedFiles(startupVersionMode, output)) {
+    if (!silent) {
+      console.log(describeWatcherNotStarted(startupVersionMode));
+    }
+    return {status: 'not-started', versionMode: startupVersionMode};
+  }
+
+  if (!silent) {
+    console.log('🚀 Starting file watcher...\n');
+  }
 
   // Track debounce timer
   let debounceTimer: NodeJS.Timeout | null = null;
@@ -43,7 +105,34 @@ export async function startWatcher(
    */
   const regenerateVersion = async (reason: string): Promise<void> => {
     try {
-      const {versionData} = await generateFileBasedVersion('cli');
+      // W4: version-manager.json is itself watched, so the mode can change
+      // under a running watcher. Read it again on every regeneration, and use
+      // THAT reading for both the write decision and the derivation.
+      const versionMode = getVersionMode();
+      if (!shouldWriteGeneratedFiles(versionMode, output)) {
+        if (!silent) {
+          console.log(
+            `ℹ️  Nothing written (${reason}): ${describeNoGeneratedFile(versionMode)}`,
+          );
+        }
+        return;
+      }
+
+      // W1: the same per-mode derivation the CLI uses. In event-log mode that
+      // is version.jsonl, never package.json's history.
+      const {versionData, warnings} = await generateVersionDataForMode(
+        versionMode,
+        'cli',
+      );
+
+      // A fallen-back measurement or an unreadable log line must not be
+      // silent here any more than it is in the CLI (critical rule 6).
+      if (!silent) {
+        for (const warning of warnings) {
+          console.warn(warning);
+        }
+      }
+
       const content = JSON.stringify(versionData, null, 2) + '\n';
 
       // Read existing file to check if content changed
@@ -180,6 +269,5 @@ export async function startWatcher(
     }
   };
 
-  // Return cleanup function
-  return cleanup;
+  return {cleanup, status: 'started'};
 }

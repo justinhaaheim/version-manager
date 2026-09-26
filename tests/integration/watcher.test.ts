@@ -5,8 +5,16 @@ import {spawn} from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import {generateFileBasedVersion} from '../../src/version-generator';
+import {readVersion} from '../../src/version-reader';
 import {assertValidVersionJson} from '../helpers/assertions';
-import {setupRepoWithVersionConfig} from '../helpers/repo-fixtures';
+import {inDirectory} from '../helpers/in-directory';
+import {
+  activateHooks,
+  setupEventLogModeRepo,
+  setupPackageJsonModeRepo,
+  setupRepoWithVersionConfig,
+} from '../helpers/repo-fixtures';
 import {TestRepo} from '../helpers/test-repo';
 
 // Simple type for package.json version field
@@ -16,20 +24,36 @@ interface PackageJson {
 }
 
 /**
+ * How the watcher process ended, or null if it was still running when the
+ * wait gave up. A null here is "did not exit", never "exited 0".
+ */
+interface WatcherExit {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
+/**
  * Helper to start watcher in background
  */
 function startWatcher(
   repoPath: string,
-  options: {debounce?: number; silent?: boolean} = {},
+  options: {debounce?: number; output?: string; silent?: boolean} = {},
 ): {
   cleanup: () => void;
-  waitForReady: () => Promise<void>;
+  getStderr: () => string;
+  getStdout: () => string;
+  waitForExit: (timeoutMs: number) => Promise<WatcherExit | null>;
+  waitForReady: (timeoutMs?: number) => Promise<void>;
 } {
   const cliPath = path.join(__dirname, '..', '..', 'src', 'index.ts');
   const args = ['watch'];
 
   if (options.debounce !== undefined) {
     args.push('--debounce', String(options.debounce));
+  }
+
+  if (options.output !== undefined) {
+    args.push('--output', options.output);
   }
 
   if (options.silent) {
@@ -59,7 +83,24 @@ function startWatcher(
     stderr += data.toString();
   });
 
-  const waitForReady = async (): Promise<void> => {
+  let exit: WatcherExit | null = null;
+  const exited = new Promise<WatcherExit>((resolve) => {
+    proc.on('exit', (code, signal) => {
+      exit = {code, signal};
+      resolve(exit);
+    });
+  });
+
+  const waitForExit = async (
+    timeoutMs: number,
+  ): Promise<WatcherExit | null> => {
+    const timedOut = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), timeoutMs),
+    );
+    return await Promise.race([exited, timedOut]);
+  };
+
+  const waitForReady = async (timeout = 5000): Promise<void> => {
     // In silent mode, we can't rely on stdout messages
     // Instead, just wait a bit for the watcher to initialize
     if (options.silent) {
@@ -69,7 +110,6 @@ function startWatcher(
 
     // Wait for "Watching for file changes..." message
     const startTime = Date.now();
-    const timeout = 5000;
 
     while (Date.now() - startTime < timeout) {
       if (stdout.includes('Watching for file changes')) {
@@ -84,12 +124,18 @@ function startWatcher(
   };
 
   const cleanup = (): void => {
-    if (!proc.killed) {
+    if (!proc.killed && exit === null) {
       proc.kill('SIGTERM');
     }
   };
 
-  return {cleanup, waitForReady};
+  return {
+    cleanup,
+    getStderr: () => stderr,
+    getStdout: () => stdout,
+    waitForExit,
+    waitForReady,
+  };
 }
 
 /**
@@ -410,4 +456,245 @@ describe('Watch Command', () => {
       watcher.cleanup();
     }
   }, 15000);
+});
+
+/** Per-test timeout for the tests below: real git, and a watcher subprocess. */
+const MODE_TEST_TIMEOUT_MS = 30000;
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Poll until `predicate()` holds.
+ *
+ * @returns true once it held, false if `timeoutMs` passed first
+ */
+async function waitUntil(
+  predicate: () => boolean,
+  timeoutMs: number,
+): Promise<boolean> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    if (predicate()) {
+      return true;
+    }
+    await sleep(100);
+  }
+
+  return predicate();
+}
+
+/**
+ * The watcher in the modes that have no generated file
+ * (version-manager-70i.11). Before that bead it wrote dynamic-version.local.json
+ * in every mode, and in event-log mode it wrote a number measured from
+ * package.json's history rather than from version.jsonl.
+ */
+describe('Watch Command in modes with no generated file (version-manager-70i.11)', () => {
+  let repo: TestRepo;
+
+  beforeEach(() => {
+    repo = new TestRepo();
+  });
+
+  afterEach(() => {
+    repo.cleanup();
+  });
+
+  /**
+   * AC1: no --output, so the watcher must say where the version lives, write
+   * nothing, and exit 0 without watching.
+   */
+  async function expectWatcherToDecline(
+    versionMode: 'event-log' | 'package-json',
+    whereTheVersionLives: string,
+  ): Promise<void> {
+    const watcher = startWatcher(repo.getPath(), {debounce: 200});
+
+    try {
+      const exit = await watcher.waitForExit(10000);
+
+      // Give a watcher that DID start something to regenerate for, and the
+      // time to do it. Without this, "no file" would hold for any watcher,
+      // running or not, because chokidar ignores its initial scan.
+      repo.writeFile('poke.txt', 'poke\n');
+      await sleep(1500);
+
+      // The harm first: no generated file in a mode that has none.
+      expect(repo.fileExists('dynamic-version.local.json')).toBe(false);
+
+      // Then: it exited by itself, with 0, rather than waiting forever.
+      expect(exit).toEqual({code: 0, signal: null});
+
+      // Then: ONE message, naming the mode, where the version lives, and how
+      // to force a file.
+      const stdout = watcher.getStdout();
+      expect(stdout).toContain(
+        `Not watching: versionMode is "${versionMode}", which writes no dynamic-version.local.json.`,
+      );
+      expect(stdout).toContain(whereTheVersionLives);
+      expect(stdout).toContain('Pass --output <path>');
+      expect(stdout).not.toContain('Starting file watcher');
+      expect(stdout).not.toContain('Watching for file changes');
+    } finally {
+      watcher.cleanup();
+    }
+  }
+
+  test(
+    'package-json mode, no --output: writes nothing, says where the version lives, exits 0',
+    async () => {
+      setupPackageJsonModeRepo(repo, '0.1.0', 'add-to-patch');
+
+      await expectWatcherToDecline(
+        'package-json',
+        'The version lives in the committed "version" field of package.json.',
+      );
+    },
+    MODE_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    'event-log mode, no --output: writes nothing, says where the version lives, exits 0',
+    async () => {
+      setupEventLogModeRepo(repo, '0.1.0', 'add-to-patch');
+
+      await expectWatcherToDecline(
+        'event-log',
+        'The version is derived from version.jsonl: read it with readVersion() from @justinhaaheim/version-manager/version-reader.',
+      );
+    },
+    MODE_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    '--silent suppresses that message, and the watcher still exits 0',
+    async () => {
+      setupEventLogModeRepo(repo, '0.1.0', 'add-to-patch');
+
+      const watcher = startWatcher(repo.getPath(), {silent: true});
+
+      try {
+        const exit = await watcher.waitForExit(10000);
+
+        expect(exit).toEqual({code: 0, signal: null});
+        expect(watcher.getStdout()).toBe('');
+        expect(watcher.getStderr()).not.toContain('Not watching');
+      } finally {
+        watcher.cleanup();
+      }
+    },
+    MODE_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    'event-log mode WITH --output: writes the version readVersion() derives, not the package.json-history count',
+    async () => {
+      setupEventLogModeRepo(repo, '0.1.0', 'add-to-patch');
+      activateHooks(repo);
+
+      // Two hooked commits: two commit events in version.jsonl.
+      for (const index of [1, 2]) {
+        repo.writeFile(`file-${index}.txt`, `${index}\n`);
+        repo.makeCommit(`commit ${index}`);
+      }
+
+      // One commit the hook never saw. git counts it and the log does not,
+      // which is what makes the two derivations disagree here.
+      repo.writeFile('unhooked.txt', 'unhooked\n');
+      repo.runGit('add -A');
+      expect(repo.runGit('commit --no-verify -m "unhooked"').exitCode).toBe(0);
+
+      // Guard against a vacuous pass: if the fixture ever stops separating
+      // the two numbers, this test could not tell them apart.
+      const fromPackageJsonHistory = await inDirectory(repo.getPath(), () =>
+        generateFileBasedVersion('cli'),
+      );
+      expect(fromPackageJsonHistory.versionData.dynamicVersion).toBe('0.1.3');
+      expect(readVersion(repo.getPath()).version).toBe('0.1.2');
+
+      const outputPath = path.join(repo.getPath(), 'watched.local.json');
+      const watcher = startWatcher(repo.getPath(), {
+        debounce: 300,
+        output: 'watched.local.json',
+      });
+
+      try {
+        await watcher.waitForReady(15000);
+
+        // chokidar ignores its initial scan, so nothing is written until
+        // something changes.
+        repo.writeFile('poke.txt', 'poke\n');
+
+        const written = await waitUntil(() => fs.existsSync(outputPath), 10000);
+        expect(written).toBe(true);
+
+        const version: unknown = JSON.parse(
+          fs.readFileSync(outputPath, 'utf-8'),
+        );
+        assertValidVersionJson(version);
+
+        // AC2, measured in the same repo after the write. branchSuffix is
+        // off (the default), so the two are directly comparable.
+        expect(version.dynamicVersion).toBe(
+          readVersion(repo.getPath()).version,
+        );
+        expect(version.dynamicVersion).toBe('0.1.2');
+
+        // The explicit path is the only file written.
+        expect(repo.fileExists('dynamic-version.local.json')).toBe(false);
+      } finally {
+        watcher.cleanup();
+      }
+    },
+    MODE_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    'the mode is re-read on every regeneration: switching to event-log mid-watch writes nothing and says so',
+    async () => {
+      setupRepoWithVersionConfig(repo, '0.1.0', '0.1.0', 'add-to-patch');
+
+      const versionFilePath = path.join(
+        repo.getPath(),
+        'dynamic-version.local.json',
+      );
+
+      // dynamic-file mode (the default): the file exists before the watch.
+      repo.runCli('--silent');
+      const before = fs.readFileSync(versionFilePath, 'utf-8');
+
+      const watcher = startWatcher(repo.getPath(), {debounce: 300});
+
+      try {
+        await watcher.waitForReady(15000);
+
+        // version-manager.json is itself watched, so this edit is both the
+        // mode change and the trigger.
+        const config = JSON.parse(repo.readFile('version-manager.json')) as {
+          versionMode?: string;
+        };
+        config.versionMode = 'event-log';
+        repo.writeFile('version-manager.json', JSON.stringify(config, null, 2));
+
+        const said = await waitUntil(
+          () => watcher.getStdout().includes('Nothing written'),
+          8000,
+        );
+
+        // Every dynamic-file write carries a fresh timestamp, so any write at
+        // all would change these bytes.
+        expect(fs.readFileSync(versionFilePath, 'utf-8')).toBe(before);
+        expect(said).toBe(true);
+        expect(watcher.getStdout()).toContain(
+          'versionMode is "event-log", which writes no dynamic-version.local.json.',
+        );
+      } finally {
+        watcher.cleanup();
+      }
+    },
+    MODE_TEST_TIMEOUT_MS,
+  );
 });

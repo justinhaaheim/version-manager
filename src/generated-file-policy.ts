@@ -2,6 +2,7 @@ import type {DynamicVersion, VersionMode} from './types';
 
 import {writeFileSync} from 'fs';
 
+import {VERSION_LOG_FILENAME} from './event-log';
 import {generateTypeDefinitions} from './version-generator';
 
 /**
@@ -77,6 +78,29 @@ export function shouldWriteGeneratedFiles(
   }
 
   return true;
+}
+
+/**
+ * Why nothing was written, and where to look instead (version-manager-70i.11,
+ * W3 and W5).
+ *
+ * The watcher and the metro plugin both decline to write in a mode that has no
+ * generated file. Declining silently would leave someone who configured them
+ * waiting for a file that never appears, so every refusal names the mode and
+ * says where the version is. This is wording only: the decision itself is
+ * shouldWriteGeneratedFiles(), above.
+ */
+export function describeNoGeneratedFile(versionMode: VersionMode): string {
+  switch (versionMode) {
+    case 'event-log':
+      return `versionMode is "event-log", which writes no dynamic-version.local.json. The version is derived from ${VERSION_LOG_FILENAME}: read it with readVersion() from @justinhaaheim/version-manager/version-reader.`;
+    case 'package-json':
+      return 'versionMode is "package-json", which writes no dynamic-version.local.json. The version lives in the committed "version" field of package.json.';
+    case 'dynamic-file':
+      // Unreachable while shouldWriteGeneratedFiles() always writes in this
+      // mode. Worded so that it stays true if that ever changes.
+      return `versionMode is "dynamic-file", which does write ${DEFAULT_OUTPUT_PATH}, but nothing was written this time.`;
+  }
 }
 
 /**

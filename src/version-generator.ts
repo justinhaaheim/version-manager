@@ -769,6 +769,64 @@ export async function generateEventLogVersionData(
 }
 
 /**
+ * A version computed by whichever derivation its mode uses, plus everything
+ * that must be said about it.
+ */
+export interface ModeVersionResult {
+  /** Output format from config (if set) */
+  configuredFormat: 'silent' | 'compact' | 'normal' | 'verbose' | undefined;
+  /** The generated version data */
+  versionData: DynamicVersion;
+  /**
+   * Everything the user must be told about how the number was reached. EMPTY
+   * MEANS "checked, nothing to report" — never "not checked" (critical rule 6).
+   */
+  warnings: string[];
+}
+
+/**
+ * Compute the version with THE DERIVATION THIS MODE USES (version-manager-70i.11,
+ * W1).
+ *
+ * event-log mode derives from version.jsonl; the other two modes count commits
+ * since package.json's version last changed. That is the choice the CLI's
+ * default command makes in src/index.ts. It lives here, in one function, so the
+ * watcher and the metro plugin cannot drift from it: before 70i.11 both called
+ * generateFileBasedVersion() in every mode, which in event-log mode wrote a
+ * number measured from package.json's history, not from the log.
+ *
+ * The pre-commit derivations are deliberately not reachable from here. They
+ * compute the version the about-to-happen commit will carry, which is a
+ * question only a pre-commit hook asks.
+ *
+ * @param versionMode - The mode to derive for. The caller reads it, so the
+ *   write decision and the derivation use the same reading.
+ * @param generationTrigger - What triggered the generation
+ */
+export async function generateVersionDataForMode(
+  versionMode: VersionMode,
+  generationTrigger: GenerationTrigger = 'cli',
+): Promise<ModeVersionResult> {
+  switch (versionMode) {
+    case 'event-log': {
+      const {configuredFormat, versionData, warnings} =
+        await generateEventLogVersionData(generationTrigger);
+      return {configuredFormat, versionData, warnings};
+    }
+    case 'dynamic-file':
+    case 'package-json': {
+      const {branchSuffixWarning, configuredFormat, versionData} =
+        await generateFileBasedVersion(generationTrigger);
+      return {
+        configuredFormat,
+        versionData,
+        warnings: branchSuffixWarning === null ? [] : [branchSuffixWarning],
+      };
+    }
+  }
+}
+
+/**
  * Read the versionMode from version-manager.json config.
  * Returns 'dynamic-file' if config is missing or versionMode is not set.
  */

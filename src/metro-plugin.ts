@@ -1,7 +1,20 @@
 import {existsSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 
-import {generateFileBasedVersion} from './version-generator';
+import {
+  describeNoGeneratedFile,
+  shouldWriteGeneratedFiles,
+} from './generated-file-policy';
+import {generateVersionDataForMode, getVersionMode} from './version-generator';
+
+/**
+ * Whether this process has already said that its mode writes nothing (W5).
+ *
+ * Module state on purpose: Metro serializes on every rebuild, so a warning
+ * per call would repeat on every save. One per process is enough to tell a
+ * user who configured the plugin why no file appears.
+ */
+let hasWarnedAboutVersionMode = false;
 
 /**
  * Metro configuration interface (simplified subset)
@@ -39,6 +52,10 @@ type MetroSerializer = (
  * - After commit: Git hook writes → Metro rebuilds → plugin generates same → no extra write
  * - After checkout: Git hook writes new version → Metro detects change → rebuilds fresh
  *
+ * Only in dynamic-file mode. In package-json and event-log mode there is no
+ * generated file, so the plugin writes nothing and warns once per process
+ * saying where the version lives instead (version-manager-70i.11, W5).
+ *
  * @param config - Metro configuration object
  * @returns Enhanced Metro configuration with version regeneration
  *
@@ -68,17 +85,42 @@ export function withVersionManager(config: MetroConfig): MetroConfig {
         // Generate version data in memory
         try {
           const outputPath = join(process.cwd(), 'dynamic-version.local.json');
-          const {versionData} = await generateFileBasedVersion('cli');
-          const newContent = JSON.stringify(versionData, null, 2) + '\n';
 
-          // Read existing file if it exists
-          const existingContent = existsSync(outputPath)
-            ? readFileSync(outputPath, 'utf8')
-            : null;
+          // W5 (version-manager-70i.11): read the mode INSIDE this try, so a
+          // failure to read it cannot break a bundle. The plugin's path is
+          // fixed and nobody types it, so it is never explicit: in a mode with
+          // no generated file, the plugin writes nothing.
+          const versionMode = getVersionMode();
+          if (
+            !shouldWriteGeneratedFiles(versionMode, {
+              explicit: false,
+              path: outputPath,
+            })
+          ) {
+            if (!hasWarnedAboutVersionMode) {
+              hasWarnedAboutVersionMode = true;
+              console.warn(
+                `[version-manager] withVersionManager() writes nothing: ${describeNoGeneratedFile(versionMode)}`,
+              );
+            }
+          } else {
+            // W1: the per-mode derivation the CLI uses. W6: in dynamic-file
+            // mode that is generateFileBasedVersion(), exactly as before.
+            const {versionData} = await generateVersionDataForMode(
+              versionMode,
+              'cli',
+            );
+            const newContent = JSON.stringify(versionData, null, 2) + '\n';
 
-          // Only write if content has changed
-          if (existingContent !== newContent) {
-            writeFileSync(outputPath, newContent);
+            // Read existing file if it exists
+            const existingContent = existsSync(outputPath)
+              ? readFileSync(outputPath, 'utf8')
+              : null;
+
+            // Only write if content has changed
+            if (existingContent !== newContent) {
+              writeFileSync(outputPath, newContent);
+            }
           }
         } catch (error) {
           // Silently fail - don't break the build if version generation fails
