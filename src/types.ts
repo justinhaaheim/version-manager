@@ -7,6 +7,23 @@ export const VersionCalculationModeSchema = z.enum([
 ]);
 
 /**
+ * The calculation mode used when version-manager.json does not name one.
+ *
+ * Deliberately explicit rather than magic: 'append-commits' leaves the base
+ * version alone and adds `+N`. Lives here, next to the schema, because three
+ * readers need it — the config schema below, the config reader in
+ * src/version-generator.ts and the git-free public reader in
+ * src/version-reader.ts — and separate literals would drift.
+ *
+ * Declared ABOVE VersionManagerConfigSchema, which uses it as the field's
+ * default (version-manager-70i.28): a const read before its declaration at
+ * module load is a temporal-dead-zone error.
+ */
+export const DEFAULT_VERSION_CALCULATION_MODE: z.infer<
+  typeof VersionCalculationModeSchema
+> = 'append-commits';
+
+/**
  * The mode a project is in. 'dynamic-file' is the default and nothing changes
  * for anyone who does not set this.
  *
@@ -62,7 +79,14 @@ export const VersionManagerConfigSchema = z
     branchSuffix: BranchSuffixConfigSchema,
     mergeDriver: MergeDriverConfigSchema,
     outputFormat: OutputFormatSchema.optional(),
-    versionCalculationMode: VersionCalculationModeSchema,
+    // version-manager-70i.28, option (a): optional like every other field.
+    // Before, it was the one required field, so a config holding only
+    // `versionMode` was rejected as a whole and every field in it ignored.
+    // The default equals getDefaultVersionManagerConfig()'s and the one
+    // src/version-reader.ts applies, so the CLI and readVersion() agree.
+    versionCalculationMode: VersionCalculationModeSchema.default(
+      DEFAULT_VERSION_CALCULATION_MODE,
+    ),
     versionMode: VersionModeSchema.optional().default('dynamic-file'),
     versions: z.record(z.string(), z.string()).default({}),
   })
@@ -97,15 +121,3 @@ export type LegacyVersionManagerConfig = z.infer<
 export type VersionManagerConfig = z.infer<typeof VersionManagerConfigSchema>;
 export type GenerationTrigger = z.infer<typeof GenerationTriggerSchema>;
 export type DynamicVersion = z.infer<typeof DynamicVersionSchema>;
-
-/**
- * The calculation mode used when version-manager.json does not name one.
- *
- * Deliberately explicit rather than magic: 'append-commits' leaves the base
- * version alone and adds `+N`. Lives here, next to the schema, because two
- * readers now need it — the config reader in src/version-generator.ts and the
- * git-free public reader in src/version-reader.ts — and two literals would
- * drift.
- */
-export const DEFAULT_VERSION_CALCULATION_MODE: VersionCalculationMode =
-  'append-commits';

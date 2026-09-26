@@ -320,7 +320,7 @@ When you add a knob: declare it in `VersionManagerConfigSchema` (the schema is `
 ### VersionManagerConfig (version-manager.json)
 ```typescript
 {
-  versionCalculationMode: 'add-to-patch' | 'append-commits';
+  versionCalculationMode: 'add-to-patch' | 'append-commits';  // default 'append-commits' (70i.28)
   versionMode: 'dynamic-file' | 'event-log' | 'package-json';  // default 'dynamic-file'
   versions: Record<string, string>;                    // e.g., {runtime: "0.1.0"}; default {}
   branchSuffix: {enabled: boolean; mainBranches: string[]};  // default {false, ['main','master']}
