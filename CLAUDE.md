@@ -63,7 +63,7 @@ bun run test:local:install  # For local development
 - In `package-json` mode: installs a `pre-commit` hook and NOTHING else — no post-* hooks, no lifecycle scripts, no gitignore entries, no generated file. It also registers the merge driver, but only when `mergeDriver.enabled` is on
 - Does NOT remove the other mode's hooks, scripts or generated file when the mode changes
 - With `--mode <m>`: first makes version-manager.json say `versionMode: m` (creating a file holding only that key, replacing just the value, or appending the key surgically; a legacy file is migrated; an invalid file fails and nothing is written or installed), then installs exactly as a file that always said `m` would. When the mode changes it warns, naming the old mode's leftovers it finds on disk. See src/install-mode.ts and the README
-- Works with standard .git/hooks and Husky
+- Always writes its hooks into `.husky/`, and only there. When package.json lists no `husky` dependency, it first installs husky (`bun add --dev husky` when there is a bun.lock, otherwise `npm install --save-dev husky`) and runs `npx husky init`. It never writes to `.git/hooks` and never reads `core.hooksPath`: husky itself sets `core.hooksPath` to `.husky/_`, and that is what makes git run the files in `.husky/`
 
 **Scripts added** (`dynamic-file` mode; the lifecycle four are skipped in `package-json` mode):
 - `dynamic-version` and `dynamic-version:generate` - Generate version file
@@ -246,11 +246,12 @@ docs/
 - All functions use `execAsync` (promisified exec) with proper error handling
 
 **git-hooks-manager.ts** (Hook Management)
-- `installGitHooks()`: Install/update hooks for post-commit, post-checkout, post-merge, post-rewrite
+- `installGitHooks()`: Install/update the post-commit, post-checkout, post-merge and post-rewrite hooks (`dynamic-file` mode), or the one pre-commit hook (`package-json` and `event-log` modes)
 - `checkGitignore()`: Verify *.local.json is ignored
-- `getGitHooksPath()`: Detect custom hooks path (core.hooksPath) or .git/hooks
+- `getHuskyHooksPath()` (private): Always `<cwd>/.husky`. There is no `.git/hooks` fallback and no `core.hooksPath` lookup
+- `ensureHuskyInstalled()` (private): When package.json lists no `husky` dependency, installs it with the detected package manager and runs `npx husky init`. When husky is listed it does nothing, so a repo that lists husky but has no `.husky/` directory fails install with "Husky directory not found"
 - Smart update logic: appends to new hooks, replaces matching lines in existing hooks
-- Detects Husky and adjusts hook format accordingly
+- Writes every hook in husky's format, with no shebang: husky's `.husky/_/h` runs each one with `sh -e`
 - Makes hooks executable with chmod 755
 
 **script-manager.ts** (package.json Management)
@@ -307,11 +308,11 @@ docs/
 
 ### Git Hook Management
 
-- Detects Husky vs standard .git/hooks
+- Always installs into `.husky/`, installing and initialising husky first when package.json does not list it. There is no `.git/hooks` path
 - Smart update logic: appends to new hooks, replaces matching lines in existing hooks
 - Warns if multiple version-manager commands found (manual intervention needed)
 - Makes hooks executable (chmod 755)
-- Respects `core.hooksPath` git config
+- Never reads `core.hooksPath`, and does not check what it is set to. Husky sets it to `.husky/_`, whose stubs run the matching files in `.husky/`
 
 ### Version modes and the two knobs
 
@@ -460,10 +461,10 @@ npm run dynamic-version:generate
 - **A failed git measurement is its own outcome, and it ends the command**: `countCommitsBetween()`, `findLastCommitWhereFieldChanged()`, `getCurrentBranch()` and `readFieldFromCommit()` return a result whose `git-failed` member carries the git command and its stderr, and the callers throw it. It never arrives as 0 commits, "never changed", "HEAD" or an absent field. `isFileTrackedByGit()` has the same member, and install's .gitignore guard fails closed on it: .gitignore is left alone, with a warning
 - **No commits yet, or package.json never committed**: `findLastCommitWhereFieldChanged()` reports `never-committed`, a real answer meaning 0 commits since (the base version as-is). The CLI still fails in a zero-commit repo, at `git describe` (version-manager-70i.29)
 - **Detached HEAD**: `getCurrentBranch()` reads "HEAD". An unborn branch reads its real name (it uses `git symbolic-ref --quiet --short HEAD`)
-- **Custom hooks path**: Code checks `git config core.hooksPath`
+- **Custom hooks path**: Nothing reads `git config core.hooksPath`. Hooks always go to `.husky/`, and husky sets `core.hooksPath` to `.husky/_`
 
 ### Hook Installation
-- **Husky detected**: Adjusts hook format (no shebang needed)
+- **Husky is always used**: Every hook is written in husky's format (no shebang). If package.json does not list `husky`, install adds it and runs `npx husky init`; if it does list husky but `.husky/` is missing, install fails with "Husky directory not found"
 - **Multiple version-manager commands**: Warns user to manually edit
 - **Existing hooks**: Appends or replaces intelligently based on pattern matching
 - **Development mode**: Detects `@justinhaaheim/version-manager` package name, uses `bun run test:local`

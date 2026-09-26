@@ -632,9 +632,9 @@ declare module '*/dynamic-version.local.json' {
 
 The tool intelligently manages git hooks:
 
-- Detects Husky and adjusts hook format accordingly
+- Always installs hooks into `.husky/`, in Husky's format. If `package.json` does not list `husky`, install adds it as a dev dependency (with `bun add --dev husky` when there is a `bun.lock`, otherwise `npm install --save-dev husky`) and runs `npx husky init`
 - Smart updates: appends to new hooks, replaces matching lines in existing hooks
-- Respects `core.hooksPath` git config
+- Never writes to `.git/hooks` and never reads `core.hooksPath`. Husky sets `core.hooksPath` to `.husky/_`, and that is how git finds the hooks in `.husky/`
 - Makes hooks executable automatically
 - Won't duplicate hook commands
 
@@ -672,7 +672,7 @@ npx @justinhaaheim/version-manager
 
 ### Git hooks not working with Husky
 
-The tool detects Husky automatically. If you have issues, try reinstalling:
+The tool always uses Husky: it installs and initialises Husky when `package.json` does not list it. If `package.json` lists `husky` but there is no `.husky/` directory, install stops with "Husky directory not found"; running `npx husky` creates it (as `.husky/_`, and points `core.hooksPath` there). If you have other issues, try reinstalling:
 
 ```bash
 npx @justinhaaheim/version-manager install
