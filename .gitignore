@@ -49,3 +49,6 @@ coverage/
 .beads/.br_recovery/
 .beads/.local_version
 .claude/worktrees/
+
+# justin-sdk baseline (appended)
+*.local.*
