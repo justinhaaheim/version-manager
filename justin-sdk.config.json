@@ -9,7 +9,8 @@
     "gh-actions-setup",
     "beads-setup",
     "critical-rules-setup",
-    "thread-rules-setup"
+    "thread-rules-setup",
+    "thread-hooks-setup"
   ],
   "componentConfig": {
     "critical-rules": {}

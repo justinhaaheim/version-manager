@@ -20,6 +20,15 @@
             "command": "jq -r '.tool_input.file_path' | { read file_path; npm run lint:fix:file -- \"$file_path\"; npm run prettier:write:file -- \"$file_path\"; }"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "bun run --cwd \"${CLAUDE_PROJECT_DIR:-.}\" justin-sdk hook PostToolUse",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
       }
     ],
     "SessionStart": [
@@ -37,6 +46,16 @@
         "hooks": [
           {
             "command": "bun run --cwd \"${CLAUDE_PROJECT_DIR:-.}\" justin-sdk hook UserPromptSubmit",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "bun run --cwd \"${CLAUDE_PROJECT_DIR:-.}\" justin-sdk hook Stop",
             "type": "command"
           }
         ]
