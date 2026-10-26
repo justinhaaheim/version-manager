@@ -36,7 +36,7 @@
       {
         "hooks": [
           {
-            "command": "bun run justin-sdk repo-state --hook",
+            "command": "bun run --cwd \"${CLAUDE_PROJECT_DIR:-.}\" justin-sdk hook UserPromptSubmit",
             "type": "command"
           }
         ]
