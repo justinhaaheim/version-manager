@@ -15,7 +15,10 @@
   "componentConfig": {
     "critical-rules": {},
     "thread": {
-      "sessionBeads": true
+      "sessionBeads": true,
+      "handoff": {
+        "successor": true
+      }
     }
   }
 }
