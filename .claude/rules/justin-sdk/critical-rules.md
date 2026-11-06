@@ -1,4 +1,4 @@
-<!-- justin-sdk rules · prompts e4d8413d974b (2026-11-06) · modules 5dfdf6b3ee88 · content f21b021c6d8a · GENERATED — run: bun run justin-sdk rules-update -->
+<!-- justin-sdk rules · prompts 863578dfc1af (2026-11-06) · modules 5dfdf6b3ee88 · content f21b021c6d8a · GENERATED — run: bun run justin-sdk rules-update -->
 
 # Critical Rules
 

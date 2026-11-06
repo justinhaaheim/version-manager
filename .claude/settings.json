@@ -60,6 +60,17 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "bun run --cwd \"${CLAUDE_PROJECT_DIR:-.}\" justin-sdk hook PreToolUse",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
     ]
   },
   "sandbox": {
