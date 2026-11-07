@@ -52,7 +52,6 @@
 
       "WebFetch(domain:gluestack.io)"
     ],
-    "deny": [],
-    "defaultMode": "acceptEdits"
+    "deny": []
   }
 }
